@@ -20,6 +20,29 @@ def test_create_job_outside_root_returns_400(client_no_worker, tmp_path) -> None
     assert response.status_code == 400
 
 
+def test_create_job_unmounted_root_returns_400_before_downloading(
+    client_no_worker, download_root
+) -> None:
+    """Racine déclarée mais absente du disque (volume non monté) : le job doit être refusé
+    à la création — sinon l'échec n'arrive qu'au déplacement, mégaoctets téléchargés."""
+    download_root.rmdir()
+
+    response = client_no_worker.post(
+        "/api/jobs",
+        json={
+            "url": "https://example.com/video",
+            "folder": str(download_root),
+            "filename": "video.mp4",
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    assert "n'existe pas" in response.json()["detail"]
+    # Aucun job n'a été créé : rien à nettoyer côté historique.
+    assert client_no_worker.get("/api/jobs", headers=AUTH).json() == []
+
+
 def test_create_job_valid_persists_as_queued(client_no_worker, download_root) -> None:
     response = client_no_worker.post(
         "/api/jobs",

@@ -64,7 +64,9 @@ Points of attention in `docker-compose.yml` (see [GPU modules](decisions/0001-st
 for context):
 
 - Mount the `EZDL_DOWNLOAD_ROOTS` roots as volumes, with the **same paths on the container
-  side as in the environment variable**.
+  side as in the environment variable**. A root that is declared but not mounted (or not writable
+  by the container user) raises a `WARNING` at startup, and any job targeting it is rejected with
+  a `400` before the download starts.
 - Mount a persistent volume on `EZDL_DATA_DIR` (SQLite + state).
 - Optional GPU block (NVIDIA/QuickSync/VAAPI) only if hardware presets are used —
   see [modules/conversion.md](modules/conversion.md).

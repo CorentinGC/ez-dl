@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from app.api import capabilities, folders, health, jobs, probe, rules
 from app.config import APP_VERSION, Settings, get_settings
 from app.core import ffmpeg, ytdlp
-from app.core.paths import PathSecurityError
+from app.core.paths import PathSecurityError, unavailable_roots
 from app.core.queue import JobQueue
 from app.db import get_engine, init_db
 
@@ -64,10 +64,21 @@ async def _periodic_ytdlp_update(binary: str, interval_hours: int) -> None:
         logger.info("Auto-update yt-dlp périodique : %s -> %s", before, after)
 
 
+def _warn_unavailable_roots(settings: Settings) -> None:
+    """Avertit au démarrage pour chaque racine déclarée mais inutilisable.
+
+    Non fatal : un volume peut être monté plus tard. Les jobs qui visent une racine
+    inutilisable sont de toute façon refusés en `400` avant tout téléchargement.
+    """
+    for _root, issue in unavailable_roots(settings.roots):
+        logger.warning("Racine de téléchargement inutilisable : %s.", issue)
+
+
 async def _bootstrap_state(app: FastAPI, settings: Settings) -> JobQueue:
     """Initialise DB, encodeurs ffmpeg, version yt-dlp et file de jobs ; peuple `app.state`."""
     engine = get_engine(settings)
     init_db(settings)
+    _warn_unavailable_roots(settings)
 
     encoders = await ffmpeg.detect_encoders(settings.ffmpeg_binary)
     # On ne journalise que les encodeurs utiles : `ffmpeg -encoders` en liste ~200.

@@ -106,6 +106,10 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **Binaire yt-dlp du Dockerfile par TARGETARCH** : `yt-dlp_linux` (amd64) vs
   `yt-dlp_linux_aarch64` (arm64). Un asset x86_64 codé en dur casse sur Apple Silicon avec
   « rosetta error: failed to open elf » au premier job.
+- **La validation de chemin est lexicale, pas physique** : `resolve()` + `is_relative_to` ne dit
+  rien d'une racine non montée ou non inscriptible. Depuis `ez-dl-keh`, `root_issue()` vérifie
+  existence/dossier/`os.access(W_OK|X_OK)` → `WARNING` au démarrage par racine cassée et
+  `RootUnavailableError` (400) avant tout téléchargement.
 - **Le nom de sortie de yt-dlp n'est PAS prédictible** : `-o` reçoit un *template*, et yt-dlp
   impose l'extension du conteneur réellement produit (un merge/remux la change en cours de
   route). `-o <dir>/<id>.part` produit `<id>.part.mp4` → `[Errno 2]` à 100 % au moment du

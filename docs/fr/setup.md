@@ -64,7 +64,9 @@ Points d'attention dans `docker-compose.yml` (voir [modules GPU](decisions/0001-
 pour le contexte) :
 
 - Monter les racines de `EZDL_DOWNLOAD_ROOTS` en volumes, avec les **mêmes chemins côté conteneur
-  que dans la variable d'environnement**.
+  que dans la variable d'environnement**. Une racine déclarée mais non montée (ou non inscriptible
+  par l'utilisateur du conteneur) déclenche un `WARNING` au démarrage, et tout job la visant est
+  refusé en `400` avant le téléchargement.
 - Monter un volume persistant sur `EZDL_DATA_DIR` (SQLite + état).
 - Bloc GPU optionnel (NVIDIA/QuickSync/VAAPI) uniquement si des presets matériels sont utilisés —
   voir [modules/conversion.md](modules/conversion.md).
