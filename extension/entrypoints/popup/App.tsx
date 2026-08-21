@@ -22,7 +22,7 @@ export default function App() {
 
   const activeSettings = configured ? settings : null;
   const { presets } = useCapabilities(activeSettings);
-  const { jobs, connectionMode, cancelJob } = useJobs(activeSettings);
+  const { jobs, connectionMode, actionError, cancelJob, pauseJob, resumeJob } = useJobs(activeSettings);
   const sourcesState = useSources(activeSettings, tab);
   const apiClient = useMemo(() => (settings ? createApiClient(toApiConfig(settings)) : null), [settings]);
 
@@ -67,7 +67,14 @@ export default function App() {
             <EmptyState variant="server-error" message="Impossible de déterminer l'onglet actif." />
           )
         ) : (
-          <JobsView jobs={jobs} connectionMode={connectionMode} onCancel={(id) => void cancelJob(id)} />
+          <JobsView
+            jobs={jobs}
+            connectionMode={connectionMode}
+            actionError={actionError}
+            onCancel={(id) => void cancelJob(id)}
+            onPause={(id) => void pauseJob(id)}
+            onResume={(job) => void resumeJob(job)}
+          />
         )}
       </main>
     </div>

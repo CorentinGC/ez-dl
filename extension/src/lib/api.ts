@@ -21,6 +21,7 @@ import type {
   FoldersResponse,
   HealthResponse,
   Job,
+  JobResumeRequest,
   ProbeRequestBody,
   ProbeResponse,
   SiteRule,
@@ -243,6 +244,20 @@ export function createApiClient(config: ApiClientConfig) {
     getJob: (id: string) => request<Job>(config, `/api/jobs/${encodeURIComponent(id)}`),
 
     deleteJob: (id: string) => request<void>(config, `/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+    /** Suspend un job en attente ou en cours ; `409` si son statut ne le permet pas. */
+    pauseJob: (id: string) => request<Job>(config, `/api/jobs/${encodeURIComponent(id)}/pause`, { method: 'POST' }),
+
+    /**
+     * Remet en file un job suspendu, en erreur ou annulé — le téléchargement repart du fichier
+     * partiel conservé côté serveur. Le contexte (cookies…) doit être refourni : il n'est jamais
+     * persisté. `409` si le statut ne le permet pas, `400` si le dossier n'est plus accessible.
+     */
+    resumeJob: (id: string, body?: JobResumeRequest) =>
+      request<Job>(config, `/api/jobs/${encodeURIComponent(id)}/resume`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      }),
 
     listRules: () => request<SiteRule[]>(config, '/api/rules'),
 

@@ -1,12 +1,14 @@
 /**
  * Suivi des jobs de téléchargement : flux SSE authentifié `/api/jobs/events` en premier choix,
  * repli automatique sur le polling `GET /api/jobs` (toutes les 2s) si le flux échoue.
+ * Expose aussi les actions de la liste : annuler, suspendre, reprendre.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type ApiClient, createApiClient, toApiConfig } from '@/src/lib/api';
 import { isServerConfigured } from '@/src/lib/storage';
 import type { ExtensionSettings, Job } from '@/src/lib/types';
+import { readCookiesForUrl } from '../readCookies';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -15,13 +17,24 @@ export type JobsConnectionMode = 'idle' | 'sse' | 'polling';
 export interface UseJobsResult {
   jobs: Job[];
   connectionMode: JobsConnectionMode;
+  /** Dernière action de la liste ayant échoué (409, 400, serveur injoignable…), à afficher. */
+  actionError: string | null;
   cancelJob: (id: string) => Promise<void>;
+  pauseJob: (id: string) => Promise<void>;
+  resumeJob: (job: Job) => Promise<void>;
+}
+
+/** Message lisible d'une erreur d'API, avec repli si l'exception n'en porte pas. */
+function actionMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
   const [jobsById, setJobsById] = useState<Map<string, Job>>(new Map());
   const [connectionMode, setConnectionMode] = useState<JobsConnectionMode>('idle');
+  const [actionError, setActionError] = useState<string | null>(null);
   const clientRef = useRef<ApiClient | null>(null);
+  const sendCookies = settings?.sendCookies ?? false;
 
   useEffect(() => {
     if (!settings || !isServerConfigured(settings)) {
@@ -67,8 +80,19 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
     };
   }, [settings]);
 
+  const applyJob = useCallback((job: Job) => setJobsById((prev) => new Map(prev).set(job.id, job)), []);
+
   const cancelJob = useCallback(async (id: string) => {
-    await clientRef.current?.deleteJob(id);
+    const client = clientRef.current;
+    if (!client) return;
+    setActionError(null);
+    try {
+      await client.deleteJob(id);
+    } catch (error) {
+      // Retirer la ligne alors que le serveur a refusé donnerait une liste mensongère.
+      setActionError(actionMessage(error, 'Impossible de supprimer ce job.'));
+      return;
+    }
     setJobsById((prev) => {
       const next = new Map(prev);
       next.delete(id);
@@ -76,7 +100,38 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
     });
   }, []);
 
+  const pauseJob = useCallback(
+    async (id: string) => {
+      const client = clientRef.current;
+      if (!client) return;
+      setActionError(null);
+      try {
+        applyJob(await client.pauseJob(id));
+      } catch (error) {
+        setActionError(actionMessage(error, 'Impossible de suspendre ce job.'));
+      }
+    },
+    [applyJob],
+  );
+
+  const resumeJob = useCallback(
+    async (job: Job) => {
+      const client = clientRef.current;
+      if (!client) return;
+      setActionError(null);
+      try {
+        // Le serveur ne persiste aucun cookie : sans nouvelle lecture, une reprise sur un site
+        // authentifié repartirait anonyme et échouerait.
+        const cookies = sendCookies ? await readCookiesForUrl(job.url) : undefined;
+        applyJob(await client.resumeJob(job.id, cookies?.length ? { cookies } : undefined));
+      } catch (error) {
+        setActionError(actionMessage(error, 'Impossible de reprendre ce job.'));
+      }
+    },
+    [applyJob, sendCookies],
+  );
+
   const jobs = Array.from(jobsById.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  return { jobs, connectionMode, cancelJob };
+  return { jobs, connectionMode, actionError, cancelJob, pauseJob, resumeJob };
 }

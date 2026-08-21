@@ -230,4 +230,9 @@ Two operational consequences:
 - the server **never** persists a job's cookies. To resume a download on an authenticated page
   after a restart, the client re-supplies them in the resume request body.
 
+On the extension side, the popup's Jobs view exposes those transitions: **Pause** on a `queued` or
+`downloading` job, **Resume** on a `paused` one, **Retry** on an `error` or `canceled` one. When the
+"send cookies" option is on, resuming re-reads the browser cookies for `job.url` and attaches them
+to the request — without that re-read, yt-dlp would start over anonymously.
+
 Every state transition triggers an SSE publication on `/api/jobs/events`.

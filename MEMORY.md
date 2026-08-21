@@ -5,14 +5,15 @@ Ne pas laisser grossir au-delà de ~150 lignes : archiver les détails stables d
 
 ## État courant
 
-Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce stade).
+Squelette complet et vérifié, commité localement sur `main` — **rien n'est encore poussé**
+(`git push` en attente de validation explicite de l'utilisateur).
 
 - **Serveur** : routes `/api/{health,capabilities,probe,folders,jobs,jobs/events,rules}`, wrappers
   yt-dlp/ffmpeg, queue asyncio + SQLite, auth Bearer. `ruff` clean, **26 tests pytest** verts.
   Smoke test réel validé : health public, 401 sans/avec mauvais mot de passe, 200 avec le bon,
   destination `/etc` refusée en 400, démarrage normal (génération auto du mot de passe si absent).
 - **Extension** : sniffer `background.ts`, popup (sources, qualité, renommage, dossier, preset,
-  jobs en SSE), options, content script picker. `compile` + `build` OK, **57 tests Vitest** verts.
+  jobs en SSE + pause/reprise/retry), options, content script picker. `compile` OK, **120 tests Vitest** verts.
   Manifest MV3 : `webRequest, storage, tabs, activeTab, cookies, scripting` + `<all_urls>`.
 - **Infra** : Dockerfile multi-stage non-root, `docker-compose.yml` (+ override GPU), CI GitHub
   Actions, Makefile. `docker compose config` validé.
@@ -50,6 +51,10 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - [x] 2026-08-21 (nuit) : `ez-dl-x3s` `EZDL_TEMP_DIR` persistant (volume nommé `ezdl-temp`,
       tmpfs conservé sur le seul sous-dossier `cookies/`), Dockerfile qui crée et chowne le
       dossier, purge des résidus au démarrage de `JobQueue.start()`. 91 tests pytest.
+- [x] 2026-08-21 (nuit) : `ez-dl-8sk` pause / reprise / retry côté extension — `pauseJob`/`resumeJob`
+      dans `src/lib/api.ts`, exposés par `useJobs`, boutons Pause / Reprendre / Réessayer dans
+      `JobsView`, cookies relus pour la reprise si l'option est active. 120 tests Vitest,
+      red-green vérifié par mutation.
 
 ## Décisions récentes (2026-08-21)
 

@@ -104,6 +104,80 @@ describe('createApiClient().createFolder', () => {
   });
 });
 
+describe('createApiClient() — pause / resume', () => {
+  const config = { baseUrl: 'http://localhost:8000', password: 'secret' };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const jobResponse = (status: string) =>
+    new Response(JOB_JSON.replace('"status":"downloading"', `"status":"${status}"`), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('POST /api/jobs/{id}/pause et retourne le job suspendu', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jobResponse('paused'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const job = await createApiClient(config).pauseJob('j1');
+
+    expect(job.status).toBe('paused');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8000/api/jobs/j1/pause');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Headers).get('Authorization')).toBe('Bearer secret');
+  });
+
+  it('POST /api/jobs/{id}/resume avec les cookies refournis', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jobResponse('queued'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cookies = [{ name: 'sid', value: 'abc', domain: '.example.com', path: '/', secure: true, httpOnly: true, expires: null }];
+    const job = await createApiClient(config).resumeJob('j1', { cookies });
+
+    expect(job.status).toBe('queued');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8000/api/jobs/j1/resume');
+    expect(JSON.parse(init.body as string)).toEqual({ cookies });
+  });
+
+  it('envoie un corps vide quand aucun contexte n\'est fourni', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jobResponse('queued'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).resumeJob('j1');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({});
+  });
+
+  it('remonte le detail lisible du serveur sur 409 (statut incompatible)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: 'Un job « done » ne peut pas être repris.' }), { status: 409 }),
+      ),
+    );
+
+    await expect(createApiClient(config).resumeJob('j1')).rejects.toMatchObject({
+      message: 'Un job « done » ne peut pas être repris.',
+      status: 409,
+    });
+  });
+
+  it('encode l\'identifiant dans le chemin', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jobResponse('paused'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).pauseJob('a/b');
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8000/api/jobs/a%2Fb/pause');
+  });
+});
+
 describe('parseJobFrame', () => {
   it('parse un frame job avec fins de ligne \\n', () => {
     const job = parseJobFrame(`event: job\ndata: ${JOB_JSON}`);

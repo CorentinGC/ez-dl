@@ -232,4 +232,9 @@ Deux conséquences opérationnelles :
   page authentifiée après un redémarrage, le client les re-fournit dans le corps de la requête de
   reprise.
 
+Côté extension, la vue Jobs du popup expose ces transitions : **Pause** sur un job `queued` ou
+`downloading`, **Reprendre** sur un job `paused`, **Réessayer** sur un job `error` ou `canceled`.
+Si l'option « envoyer les cookies » est active, la reprise relit les cookies du navigateur pour
+`job.url` et les joint à la requête — sans cette relecture, yt-dlp repartirait anonyme.
+
 Toute transition d'état déclenche une publication SSE sur `/api/jobs/events`.

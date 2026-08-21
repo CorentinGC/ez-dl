@@ -147,6 +147,8 @@ export type JobStatus =
   | 'moving'
   | 'done'
   | 'error'
+  /** Suspendu (pause explicite ou redémarrage du serveur) : le fichier partiel est conservé. */
+  | 'paused'
   | 'canceled';
 
 export interface Job {
@@ -186,6 +188,16 @@ export interface CreateJobRequest {
 export interface CreateJobResponse {
   job_id: string;
   status: JobStatus;
+}
+
+/**
+ * Corps du POST /api/jobs/{id}/resume. Le serveur ne conserve aucun cookie entre deux jobs :
+ * une reprise sur un site authentifié doit les fournir à nouveau, sinon yt-dlp repart anonyme.
+ */
+export interface JobResumeRequest {
+  cookies?: CookieParam[];
+  headers?: Record<string, string>;
+  referer?: string;
 }
 
 // ---------------------------------------------------------------------------
