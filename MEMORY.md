@@ -10,7 +10,7 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **Serveur** : routes `/api/{health,capabilities,probe,folders,jobs,jobs/events,rules}`, wrappers
   yt-dlp/ffmpeg, queue asyncio + SQLite, auth Bearer. `ruff` clean, **26 tests pytest** verts.
   Smoke test réel validé : health public, 401 sans/avec mauvais mot de passe, 200 avec le bon,
-  destination `/etc` refusée en 400, démarrage impossible sans `EZDL_PASSWORD`.
+  destination `/etc` refusée en 400, démarrage normal (génération auto du mot de passe si absent).
 - **Extension** : sniffer `background.ts`, popup (sources, qualité, renommage, dossier, preset,
   jobs en SSE), options, content script picker. `compile` + `build` OK, **57 tests Vitest** verts.
   Manifest MV3 : `webRequest, storage, tabs, activeTab, cookies, scripting` + `<all_urls>`.
@@ -32,8 +32,16 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
       only), activée par `docker-compose.gpu.yml`. Build des 2 variantes validé. 2026-08-21.
 - [x] `ez-dl-ek5` : `generalizeUrlPattern` (detection.ts) branchée sur le flux picker — ids
       variables et valeurs de query réduits en `*`. 2026-08-21.
-- [ ] **Gros lot non commité** (fix SSE + 3 issues + docs) : en attente de validation utilisateur
+- [ ] **Gros lot non commité** (fix SSE + issues + docs) : en attente de validation utilisateur
       pour committer.
+- [x] 2026-08-21 (soir) : `ez-dl-3qz` (chemins relatifs rejetés), `ez-dl-5jw` (mot de passe
+      auto-généré + bandeau console + docs), `ez-dl-5pg` (yt-dlp par TARGETARCH), `ez-dl-aod`
+      (contrat probe/cookies + erreurs 422 lisibles), `ez-dl-gvi` (dédup variantes + dropdown
+      qualité). Audit security-reviewer lancé sur le lot auth/cookies.
+- [x] Correctifs de l'audit sécurité (2026-08-21) : `ez-dl-z1k` (injection d'arguments yt-dlp,
+      élevée), `ez-dl-vi2` (fuite `EZDL_PASSWORD` dans l'erreur de démarrage), `ez-dl-0su`
+      (cookie-jar hors tmpfs), `ez-dl-aml` (compare_digest bytes, caractères de contrôle,
+      filtrage du stderr yt-dlp). Chaque correctif vérifié en red-green. 50 tests pytest.
 
 ## Décisions récentes (2026-08-21)
 
@@ -45,7 +53,9 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **Doc bilingue** : FR canonique, EN miroir synchronisé dans le même commit.
 - **npm au lieu de pnpm** pour l'extension : pnpm absent de la machine de dev.
 - **Auth par mot de passe obligatoire** (`EZDL_PASSWORD`, Bearer, constant-time) : pas de mode
-  "sans mot de passe", le serveur refuse de démarrer sinon.
+  "sans mot de passe". Depuis `ez-dl-5jw`, si `EZDL_PASSWORD` est absent le serveur ne refuse
+  plus de démarrer : il **génère** un mot de passe fort à chaque démarrage et l'affiche dans un
+  bandeau console isolé (pause 5 s avant les logs de bootstrap).
 - **Auto-update yt-dlp périodique** : `-U` non bloquant au démarrage + tâche asyncio configurable
   (`EZDL_YTDLP_UPDATE_INTERVAL_HOURS`).
 - **E2E validé (2026-08-21)** : Chromium Playwright (`launchPersistentContext` +
@@ -77,11 +87,33 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
   sous-titres, PCM). `relevant_encoders()` réduit à ceux exploitables — ne pas exposer la liste brute.
 - **`EventSource` ne peut pas porter d'en-tête `Authorization`** : le suivi des jobs en SSE est donc
   fait à la main via `fetch` + `ReadableStream`, avec repli sur du polling.
+- **`--` obligatoire avant l'URL passée à yt-dlp** : sans lui, une URL en `-...` est parsée
+  comme une option (`--exec`, `--paths`) → exécution de commande et écriture hors
+  `EZDL_DOWNLOAD_ROOTS`, ce qui annule toute la validation de chemins. Doublé d'un type
+  `MediaUrl` (http/https only) sur les schémas d'entrée.
+- **Validateurs pydantic de `Settings` : par CHAMP, jamais de modèle** — pydantic joint la
+  valeur d'entrée au message d'erreur, et l'entrée d'un `model_validator` est le dict complet
+  des réglages : `EZDL_PASSWORD` se retrouverait dans les logs de démarrage.
+- **FastAPI : `url: MediaUrl = Query(...)` ignore silencieusement l'`AfterValidator`** — il faut
+  écrire `url: Annotated[MediaUrl, Query()]`. Vérifié sur FastAPI 0.141.1 (200 vs 422).
+- **Cookie-jar temporaire dans `EZDL_TEMP_DIR`**, jamais dans le `/tmp` du système :
+  c'est ce répertoire qui est monté en tmpfs, donc le seul où des cookies en clair ne touchent
+  pas la couche disque du conteneur.
+- **Contrat cookies extension→serveur** : liste structurée `CookieParam[]` (miroir de
+  `CookieItem`), JAMAIS une chaîne Netscape — c'est le serveur qui écrit le cookie-jar yt-dlp.
+  Et le `POST /api/probe` lit l'URL dans le **corps**, pas en query (la query n'est lue que par
+  la variante GET). Violé une fois → 422 sur tout x.com (`ez-dl-aod`).
+- **Binaire yt-dlp du Dockerfile par TARGETARCH** : `yt-dlp_linux` (amd64) vs
+  `yt-dlp_linux_aarch64` (arm64). Un asset x86_64 codé en dur casse sur Apple Silicon avec
+  « rosetta error: failed to open elf » au premier job.
 - **SSE : sse-starlette émet des fins de ligne `\r\n`** : tout parsing côté client doit découper
   les frames sur `\r?\n\r?\n`, jamais sur `'\n\n'` littéral (bug corrigé dans `api.ts`).
 - **Chrome de marque ≥ 137 ne supporte plus `--load-extension`** : pour tester l'extension
   unpacked, utiliser le Chromium de Playwright. Le MCP `chrome-devtools` ne convient pas non
   plus pour ça (puppeteer lance Chrome avec `--disable-extensions` par défaut).
+- **`EZDL_DATA_DIR`/`EZDL_TEMP_DIR` sont des chemins DANS le conteneur** (`/config`,
+  `/tmp/ez-dl`) : une valeur relative (`./test`) donnait un `PermissionError` opaque au démarrage.
+  Depuis `ez-dl-3qz`, `Settings` rejette tout chemin relatif avec un message explicite (non commité).
 - **Assets vidéo externes piégeux pour les e2e** : `commondatastorage.googleapis.com` refuse les
   UA non-navigateur (403 pour yt-dlp/curl), `media.w3.org` 403 par intermittence quand yt-dlp
   envoie un `Referer` étranger. Servir la vidéo de test en local (`python3 -m http.server`).

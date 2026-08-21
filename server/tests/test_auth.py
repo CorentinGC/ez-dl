@@ -3,6 +3,8 @@ valide ; `/api/health` reste accessible sans authentification."""
 
 from __future__ import annotations
 
+import pytest
+
 from tests.conftest import TEST_PASSWORD
 
 
@@ -26,3 +28,32 @@ def test_protected_route_with_correct_password_returns_200(client) -> None:
     response = client.get("/api/jobs", headers={"Authorization": f"Bearer {TEST_PASSWORD}"})
     assert response.status_code == 200
     assert response.json() == []
+
+
+async def test_non_ascii_token_raises_401_not_type_error(base_env) -> None:
+    """`secrets.compare_digest` lève `TypeError` sur des `str` non-ASCII, ce qui donnerait un
+    500 au lieu d'un 401. Testé sous la couche HTTP : httpx refuse d'émettre un tel en-tête,
+    mais Starlette décode les octets bruts d'un client quelconque en latin-1."""
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from app.security import require_auth
+
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="mot-de-passé")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_auth(credentials=credentials, settings=base_env)
+
+    assert exc_info.value.status_code == 401
+
+
+async def test_non_ascii_password_still_authenticates(base_env, monkeypatch) -> None:
+    """Un `EZDL_PASSWORD` accentué doit rester utilisable (et non casser toutes les routes)."""
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from app.security import require_auth
+
+    monkeypatch.setattr(base_env, "password", "mot-de-passé-accentué")
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="mot-de-passé-accentué")
+
+    assert await require_auth(credentials=credentials, settings=base_env) is None

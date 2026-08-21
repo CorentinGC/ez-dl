@@ -36,3 +36,6 @@ downloads/
 # ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
+
+# Surcharges docker locales (chemins réels de la machine)
+docker-compose.override.yml

@@ -154,7 +154,7 @@ for a ready-to-copy file.
 
 | Variable                            | Default                  | Role                                                                                              |
 | ------------------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------- |
-| `EZDL_PASSWORD`                      | *(required, no default)* | API access password. The server refuses to start if it's missing or empty.                        |
+| `EZDL_PASSWORD`                      | *(recommended)* | API access password. If missing or empty, the server generates a strong password (32 URL-safe characters) each startup, displays it in the console with a 5-second pause, then starts. Set it in `.env` for a stable password. |
 | `EZDL_HOST`                          | `0.0.0.0`                 | uvicorn bind address                                                                                |
 | `EZDL_PORT`                          | `8000`                    | HTTP port                                                                                           |
 | `EZDL_DOWNLOAD_ROOTS`                | `Downloads=/data/downloads` | Allowed destination roots, format `Label=/path` separated by `,`. Only these paths (and their subfolders) are writable. |
@@ -177,9 +177,7 @@ EZDL_DOWNLOAD_ROOTS=Movies=/mnt/media/movies,Shows=/mnt/media/shows,Downloads=/m
 
 ## Security
 
-- **A password is always required.** The server will not start without `EZDL_PASSWORD` set — there
-  is no "no auth" mode. The extension sends it as `Authorization: Bearer <EZDL_PASSWORD>` on every
-  request except `/api/health`.
+- **Authentication is always required.** If `EZDL_PASSWORD` is not set, the server generates a strong password (32 characters) each startup, displays it in an isolated console banner with a 5-second pause, then starts normally — retrieve this password from the startup logs. There is no "no auth" mode. For a stable password, set `EZDL_PASSWORD` in `.env`. The extension sends it as `Authorization: Bearer <EZDL_PASSWORD>` on every request except `/api/health`.
 - **Don't expose the server directly to the internet.** If you need remote access, put a
   reverse proxy with TLS in front of it. Minimal examples:
 

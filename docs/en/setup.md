@@ -20,7 +20,7 @@
 ```bash
 cd server
 uv sync                 # installs dependencies (including the dev group: pytest, ruff, httpx)
-cp ../.env.example .env # set EZDL_PASSWORD at minimum
+cp ../.env.example .env # (optional) set EZDL_PASSWORD for a stable password
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -39,7 +39,7 @@ root for the template with generic values).
 
 | Variable | Default | Role |
 |---|---|---|
-| `EZDL_PASSWORD` | *(required, no default)* | API access password. The server refuses to start if it is missing or empty. |
+| `EZDL_PASSWORD` | *(recommended)* | API access password. If missing or empty, the server generates a strong password (32 URL-safe characters) each startup, displays it in the console with a 5-second pause, then starts. Set it in `.env` for a stable password. |
 | `EZDL_HOST` | `0.0.0.0` | uvicorn bind |
 | `EZDL_PORT` | `8000` | HTTP port |
 | `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Allowed roots, format `Label=/path` separated by `,`. Only these paths (and their subfolders) are writable. |
@@ -83,12 +83,15 @@ for context):
 
 ## Server + password configuration
 
-1. Set `EZDL_PASSWORD` on the server side (`.env` file or the container's environment
-   variable) — see [ADR 0003](decisions/0003-auth-mot-de-passe.md).
-2. Start the server; it refuses to start if `EZDL_PASSWORD` is empty or missing.
+1. (Optional) Set `EZDL_PASSWORD` on the server side (`.env` file or the container's environment
+   variable) for a stable password. If you don't set it, the server will generate a password
+   each startup — see [ADR 0003](decisions/0003-auth-mot-de-passe.md).
+2. Start the server. If no password is set, it displays an isolated banner in the console with
+   a generated password (32 URL-safe characters) and pauses for 5 seconds to allow you to copy
+   it. You can retrieve this password from the startup logs.
 3. On the extension's options page: enter the server URL (e.g.
-   `http://nas.local:8000`) and the same password, then use the **Test
-   connection** button.
+   `http://nas.local:8000`) and the same password (either the one you set in `.env` or the
+   one generated and displayed at startup), then use the **Test connection** button.
 4. The password is stored on the extension side in `chrome.storage.local` and sent as
    `Authorization: Bearer <password>` with every request.
 

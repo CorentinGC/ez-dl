@@ -1,7 +1,9 @@
 # Stack Docker de ez-dl (serveur uniquement — l'extension Chrome n'est pas conteneurisée).
 #
 # Démarrage :
-#   1. Copier ce fichier tel quel, créer un `.env` à côté avec au minimum EZDL_PASSWORD=<mot de passe fort>
+#   1. Copier ce fichier tel quel ; créer si possible un `.env` à côté avec
+#      EZDL_PASSWORD=<mot de passe fort> (sinon un mot de passe est généré à chaque
+#      démarrage et affiché dans `docker compose logs`)
 #   2. Adapter les volumes médias ci-dessous (chemins réels de votre NAS/disque)
 #   3. `docker compose up -d`
 #
@@ -28,10 +30,10 @@ services:
         required: false
 
     environment:
-      # Obligatoire : le serveur refuse de démarrer sans mot de passe. La syntaxe `:?`
-      # fait échouer `docker compose up` explicitement si la variable est absente/vide,
-      # plutôt que de démarrer silencieusement sans authentification.
-      EZDL_PASSWORD: "${EZDL_PASSWORD:?EZDL_PASSWORD est requis, definissez-le dans un fichier .env ou dans l'environnement}"
+      # Recommandé : définir EZDL_PASSWORD dans un fichier .env. S'il est absent/vide, le
+      # serveur génère un mot de passe fort à CHAQUE démarrage et l'affiche dans les logs
+      # (`docker compose logs server`) — il n'existe pas de mode sans authentification.
+      EZDL_PASSWORD: "${EZDL_PASSWORD:-}"
       EZDL_HOST: ${EZDL_HOST:-0.0.0.0}
       EZDL_PORT: ${EZDL_PORT:-8000}
       # Racines de téléchargement autorisées, format `Label=/chemin` séparé par des virgules.

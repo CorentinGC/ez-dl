@@ -34,19 +34,26 @@ def _format_cookie_line(cookie: CookieItem) -> str:
 
 
 @contextmanager
-def cookie_jar_file(cookies: list[CookieItem] | None) -> Iterator[Path | None]:
+def cookie_jar_file(cookies: list[CookieItem] | None, temp_dir: Path) -> Iterator[Path | None]:
     """Fournit le chemin d'un fichier `cookies.txt` temporaire (permissions 0600),
     supprimé à la sortie du contexte. Retourne `None` si aucun cookie n'est fourni
-    (aucun fichier n'est créé dans ce cas). Les cookies ne sont jamais loggés."""
+    (aucun fichier n'est créé dans ce cas). Les cookies ne sont jamais loggés.
+
+    Le fichier est créé dans `temp_dir` (`EZDL_TEMP_DIR`) et non dans le `/tmp` du système :
+    c'est ce répertoire qui est monté en tmpfs par le compose, donc le seul où des cookies
+    en clair ne touchent pas la couche disque du conteneur."""
     if not cookies:
         yield None
         return
-    fd, raw_path = tempfile.mkstemp(prefix="ez-dl-cookies-", suffix=".txt")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    fd, raw_path = tempfile.mkstemp(prefix="ez-dl-cookies-", suffix=".txt", dir=temp_dir)
     path = Path(raw_path)
     try:
-        os.chmod(path, 0o600)
-        lines = [_NETSCAPE_HEADER, *(_format_cookie_line(c) for c in cookies)]
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            # fchmod sur le descripteur déjà possédé : pas de fenêtre où le fichier existe
+            # sous un autre chemin, et le fd est refermé même si le chmod échoue.
+            os.fchmod(fh.fileno(), 0o600)
+            lines = [_NETSCAPE_HEADER, *(_format_cookie_line(c) for c in cookies)]
             fh.write("\n".join(lines) + "\n")
         yield path
     finally:

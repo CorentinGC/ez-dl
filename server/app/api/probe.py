@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.core import ytdlp
 from app.core.cookies import cookie_jar_file
-from app.schemas import FormatOut, ProbeRequest, ProbeResponse
+from app.schemas import FormatOut, MediaUrl, ProbeRequest, ProbeResponse
 from app.security import require_auth
 
 router = APIRouter(tags=["probe"], dependencies=[Depends(require_auth)])
@@ -18,7 +20,7 @@ async def _do_probe(request: Request, url: str, body: ProbeRequest | None) -> Pr
     cookies = body.cookies if body else None
     headers = body.headers if body else None
     referer = body.referer if body else None
-    with cookie_jar_file(cookies) as cookies_file:
+    with cookie_jar_file(cookies, settings.temp_dir) as cookies_file:
         try:
             info = await ytdlp.probe(
                 url,
@@ -43,7 +45,7 @@ async def _do_probe(request: Request, url: str, body: ProbeRequest | None) -> Pr
 
 
 @router.get("/probe", response_model=ProbeResponse)
-async def probe_get(request: Request, url: str = Query(...)) -> ProbeResponse:
+async def probe_get(request: Request, url: Annotated[MediaUrl, Query()]) -> ProbeResponse:
     """Analyse une URL vidéo (sans contexte de page authentifiée)."""
     return await _do_probe(request, url, None)
 

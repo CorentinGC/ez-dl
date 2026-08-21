@@ -2,11 +2,35 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from app.models import JobStatus, RuleSource
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _validate_media_url(value: str) -> str:
+    """Restreint les URL soumises à http/https. Défense en profondeur : `yt-dlp` reçoit déjà
+    l'URL après un `--`, mais un schéma libre ouvrirait `file://` et les URL en `-`."""
+    if not value.startswith(("http://", "https://")):
+        raise ValueError("URL invalide : seuls les schémas http:// et https:// sont acceptés.")
+    return value
+
+
+def _reject_control_chars(value: str) -> str:
+    """Refuse les caractères de contrôle : dans un cookie ils casseraient le format TSV du
+    cookie-jar Netscape, et yt-dlp recopierait alors la ligne fautive sur stderr."""
+    if _CONTROL_CHARS.search(value):
+        raise ValueError("Caractère de contrôle interdit.")
+    return value
+
+
+MediaUrl = Annotated[str, AfterValidator(_validate_media_url)]
+CookieField = Annotated[str, AfterValidator(_reject_control_chars)]
 
 
 class CookieItem(BaseModel):
@@ -14,10 +38,10 @@ class CookieItem(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    name: str
-    value: str
-    domain: str
-    path: str = "/"
+    name: CookieField
+    value: CookieField
+    domain: CookieField
+    path: CookieField = "/"
     secure: bool = False
     http_only: bool = Field(default=False, alias="httpOnly")
     expires: float | None = None
@@ -26,7 +50,7 @@ class CookieItem(BaseModel):
 class ProbeRequest(BaseModel):
     """Corps de `POST /api/probe` : URL + contexte optionnel (cookies, headers, referer)."""
 
-    url: str
+    url: MediaUrl
     cookies: list[CookieItem] | None = None
     headers: dict[str, str] | None = None
     referer: str | None = None
@@ -133,7 +157,7 @@ class FoldersResponse(BaseModel):
 class JobCreate(BaseModel):
     """Corps de `POST /api/jobs`."""
 
-    url: str
+    url: MediaUrl
     format_id: str | None = None
     folder: str
     filename: str | None = None

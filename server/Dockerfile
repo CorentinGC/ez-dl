@@ -110,8 +110,16 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
 # yt-dlp STANDALONE officiel (pas la version pip) : requis pour que l'auto-update
 # `yt-dlp -U` au démarrage et périodique (EZDL_YTDLP_UPDATE_INTERVAL_HOURS) fonctionne.
 # Le lien "latest/download" suit toujours la dernière release sans figer une date de build.
-RUN curl -fL --retry 3 -o /usr/local/bin/yt-dlp \
-        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" \
+# Binaire choisi selon l'architecture cible : un yt-dlp_linux (x86_64) codé en dur casse
+# sur arm64 (Apple Silicon) avec « rosetta error: failed to open elf ».
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+        amd64) YTDLP_ASSET="yt-dlp_linux" ;; \
+        arm64) YTDLP_ASSET="yt-dlp_linux_aarch64" ;; \
+        *) echo "Architecture non supportée pour yt-dlp : TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fL --retry 3 -o /usr/local/bin/yt-dlp \
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${YTDLP_ASSET}" \
     && chmod 755 /usr/local/bin/yt-dlp
 
 # Utilisateur non-root dédié. Le binaire yt-dlp est chown vers cet utilisateur

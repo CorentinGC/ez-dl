@@ -4,6 +4,7 @@
  * en un modèle unique affiché par `SourceCard`.
  */
 
+import type { QualityVariant } from '@/src/lib/detection';
 import type { MediaKind, ProbeFormat } from '@/src/lib/types';
 
 /** Source issue de `/api/probe` : plusieurs formats/qualités au choix. */
@@ -21,10 +22,13 @@ export interface ProbeSource {
 /** Source sniffée sur le réseau, non couverte par `/api/probe` : une seule URL directe. */
 export interface SniffedSource {
   kind: 'sniffed';
+  /** URL de la meilleure qualité connue (défaut du téléchargement). */
   mediaUrl: string;
   mediaKind: MediaKind;
   /** Titre de la page (aucun titre propre à ce flux). */
   title: string;
+  /** Déclinaisons de qualité du même flux (meilleure d'abord), si plusieurs ont été sniffées. */
+  qualityVariants?: QualityVariant[];
 }
 
 export type Source = ProbeSource | SniffedSource;

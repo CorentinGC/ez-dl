@@ -22,8 +22,10 @@ Authentification par **mot de passe partagé transmis en Bearer token** :
   (nécessaire pour un healthcheck Docker sans configuration).
 - Comparaison en **temps constant** (`secrets.compare_digest`) pour éviter les attaques par mesure
   de timing sur la comparaison de chaînes.
-- Le serveur **refuse de démarrer** si `EZDL_PASSWORD` est absent ou vide — pas de mode "sans mot de
-  passe" possible, même par erreur de configuration.
+- Si `EZDL_PASSWORD` n'est pas défini ou vide, le serveur génère automatiquement un mot de passe
+  fort (`secrets.token_urlsafe(24)`, ~192 bits d'entropie) au démarrage, l'affiche dans un bandeau
+  isolé en console (pause 5 s avant la reprise des logs), puis redémarre normalement. Aucun mode
+  "sans authentification" n'existe — l'authentification reste obligatoire, généré ou fourni.
 - Le mot de passe n'est jamais loggé, ni lui ni les cookies transmis par l'extension.
 - Côté extension, le mot de passe est stocké dans `chrome.storage.local` (persistant, propre au
   profil Chrome).
@@ -42,7 +44,7 @@ Authentification par **mot de passe partagé transmis en Bearer token** :
   pour un serveur personnel sur LAN sans annuaire d'utilisateurs.
 - **Pas d'authentification (réseau de confiance implicite)** : écarté — même sur un LAN, le serveur
   écrit des fichiers et manipule des cookies de session ; l'absence totale d'auth est jugée
-  inacceptable, d'où la règle "refuse de démarrer sans mot de passe".
+  inacceptable. Aucun mode "sans mot de passe" ne doit être possible.
 
 ## Conséquences
 
@@ -56,3 +58,21 @@ Authentification par **mot de passe partagé transmis en Bearer token** :
   Acceptable pour le cas d'usage cible (utilisateur unique ou groupe de confiance restreint).
 - Si le besoin de comptes multiples ou de permissions différenciées émerge, cette ADR devra être
   révisée (migration vers des tokens par client a minima).
+
+## Amendement (2026-08-21, issue ez-dl-5jw)
+
+**Amélioration du premier démarrage et de l'onboarding** : la décision initiale préconisait un refus
+de démarrage si `EZDL_PASSWORD` était absent ou vide. Cette rigueur, bien que sécuritaire, rendait
+l'onboarding verbeux (obligation de copier-coller une valeur d'exemple ou de générer un mot de passe
+*a priori*).
+
+**Comportement réel depuis 2026-08-21** : si `EZDL_PASSWORD` est absent ou vide, le serveur génère
+automatiquement un mot de passe fort au démarrage, l'affiche dans un bandeau isolé en console
+(avec pause de 5 s pour garantir la visibilité), puis démarre normalement. Cette approche améliore
+l'UX de premier démarrage sans jamais dégrader la sécurité (chaque démarrage obtient une clé
+différente si elle n'est pas définie, et l'auth reste obligatoire sur toutes les routes — il n'y a
+toujours pas de mode sans mot de passe). L'utilisateur peut alors récupérer ce mot de passe généré,
+le stocker dans la variable d'environnement `EZDL_PASSWORD`, et recréer le conteneur pour obtenir
+un démarrage silencieux. Tant que `EZDL_PASSWORD` n'est pas défini, le mot de passe reste lisible
+dans `docker logs` (un simple `docker restart` ne le purge pas ; récréer le conteneur en est la
+seule façon).

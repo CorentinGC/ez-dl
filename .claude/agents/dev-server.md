@@ -32,9 +32,12 @@ modèles SQLModel (SQLite), configuration via pydantic-settings (préfixe `EZDL_
   `/api/folders`.
 - **Sanitize des noms de fichiers** : retirer `/`, `\`, `..`, caractères de contrôle, limiter la
   longueur.
-- **Auth constant-time** : comparaison du mot de passe via `secrets.compare_digest`, dépendance
-  FastAPI unique appliquée à toutes les routes sauf `/api/health`. Le serveur doit refuser de
-  démarrer si `EZDL_PASSWORD` est vide/absent.
+- **Auth constant-time** : comparaison du mot de passe via `secrets.compare_digest` (sur des
+  `bytes` : `compare_digest` lève `TypeError` sur des `str` non-ASCII), dépendance FastAPI unique
+  appliquée à toutes les routes sauf `/api/health`. Si `EZDL_PASSWORD` est vide/absent, le serveur
+  génère un mot de passe fort et l'affiche au démarrage : jamais de mode sans authentification.
+- **URL vers yt-dlp** : `--` avant l'URL dans la liste d'arguments + validation `http`/`https` au
+  niveau du schéma pydantic (une URL en `-...` serait sinon parsée comme une option yt-dlp).
 - **Cookies** : jamais loggés (ni le mot de passe), écrits en fichier temporaire à permissions
   `0600`, supprimés après usage.
 - **Taille des fichiers** : < 400 LOC, découper sinon. DRY, SRP, early returns, pas de dead code.

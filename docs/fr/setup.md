@@ -20,7 +20,7 @@
 ```bash
 cd server
 uv sync                 # installe les dépendances (dont le groupe dev : pytest, ruff, httpx)
-cp ../.env.example .env # renseigner EZDL_PASSWORD au minimum
+cp ../.env.example .env # (optionnel) renseigner EZDL_PASSWORD pour un mot de passe stable
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -39,7 +39,7 @@ racine pour le gabarit avec valeurs génériques).
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `EZDL_PASSWORD` | *(requis, pas de défaut)* | Mot de passe d'accès à l'API. Le serveur refuse de démarrer s'il est absent ou vide. |
+| `EZDL_PASSWORD` | *(recommandé)* | Mot de passe d'accès à l'API. Si absent ou vide, le serveur génère un mot de passe fort (32 caractères URL-safe) à chaque démarrage, l'affiche dans la console avec une pause de 5 secondes, puis démarre. Définiez-le dans `.env` pour un mot de passe stable. |
 | `EZDL_HOST` | `0.0.0.0` | Bind uvicorn |
 | `EZDL_PORT` | `8000` | Port HTTP |
 | `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Racines autorisées, format `Label=/chemin` séparées par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. |
@@ -83,11 +83,10 @@ pour le contexte) :
 
 ## Configuration serveur + mot de passe
 
-1. Définir `EZDL_PASSWORD` côté serveur (fichier `.env` ou variable d'environnement du conteneur) —
-   voir [ADR 0003](decisions/0003-auth-mot-de-passe.md).
-2. Démarrer le serveur ; il refuse de démarrer si `EZDL_PASSWORD` est vide ou absent.
+1. (Optionnel) Définir `EZDL_PASSWORD` côté serveur (fichier `.env` ou variable d'environnement du conteneur) pour un mot de passe stable. Si vous ne le définissez pas, le serveur générera un mot de passe à chaque démarrage — voir [ADR 0003](decisions/0003-auth-mot-de-passe.md).
+2. Démarrer le serveur. S'il n'y a pas de mot de passe défini, il affiche un bandeau isolé dans la console avec un mot de passe généré (32 caractères URL-safe) et pause 5 secondes pour permettre de le copier. Vous pouvez récupérer ce mot de passe dans les logs de démarrage.
 3. Dans la page d'options de l'extension : renseigner l'URL du serveur (ex.
-   `http://nas.local:8000`) et le même mot de passe, puis utiliser le bouton **Tester la
+   `http://nas.local:8000`) et le même mot de passe (soit celui défini dans `.env`, soit celui généré et affiché à la démarrage), puis utiliser le bouton **Tester la
    connexion**.
 4. Le mot de passe est stocké côté extension dans `chrome.storage.local` et envoyé en
    `Authorization: Bearer <mot de passe>` à chaque requête.

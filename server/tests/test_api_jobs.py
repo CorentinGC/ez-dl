@@ -50,3 +50,39 @@ def test_create_job_requires_auth(client_no_worker, download_root) -> None:
         json={"url": "https://example.com/video", "folder": str(download_root)},
     )
     assert response.status_code == 401
+
+
+def test_create_job_rejects_option_like_url(client_no_worker, download_root) -> None:
+    """Une URL commençant par `-` serait parsée par yt-dlp comme une option (`--exec`...) :
+    elle doit être refusée par le schéma avant d'atteindre le subprocess."""
+    response = client_no_worker.post(
+        "/api/jobs",
+        json={
+            "url": "--exec=touch /tmp/pwned",
+            "folder": str(download_root),
+            "filename": "video.mp4",
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_job_rejects_non_http_scheme(client_no_worker, download_root) -> None:
+    """`file://` permettrait de faire lire un fichier local du conteneur à yt-dlp."""
+    response = client_no_worker.post(
+        "/api/jobs",
+        json={"url": "file:///etc/passwd", "folder": str(download_root), "filename": "v.mp4"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+
+
+def test_probe_rejects_option_like_url(client_no_worker) -> None:
+    """Même protection sur les deux variantes de `/api/probe`."""
+    get_response = client_no_worker.get("/api/probe?url=--version", headers=AUTH)
+    post_response = client_no_worker.post("/api/probe", json={"url": "--version"}, headers=AUTH)
+
+    assert get_response.status_code == 422
+    assert post_response.status_code == 422

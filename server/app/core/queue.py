@@ -219,7 +219,7 @@ class JobQueue:
         self._settings.temp_dir.mkdir(parents=True, exist_ok=True)
         temp_path = self._settings.temp_dir / f"{job.id}.part"
         job_id = job.id
-        with cookie_jar_file(context.cookies) as cookies_file:
+        with cookie_jar_file(context.cookies, self._settings.temp_dir) as cookies_file:
             try:
                 job = self._update_job(session, job, status=JobStatus.DOWNLOADING)
                 process = await ytdlp.start_download(

@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseJobFrame, splitSseFrames } from './api';
+import { errorMessageFromBody, parseJobFrame, splitSseFrames } from './api';
 
 const JOB_JSON = '{"id":"j1","url":"https://example.com/v.mp4","title":null,"filename":"v.mp4","folder":"/data","status":"downloading","progress":42,"speed":null,"eta":null,"size":null,"error":null,"preset_id":"copy","format_id":null,"created_at":"2026-01-01T00:00:00","updated_at":"2026-01-01T00:00:01"}';
 
@@ -25,6 +25,31 @@ describe('splitSseFrames', () => {
     const { frames, rest } = splitSseFrames('event: job\r\ndata: pas-encore-fini');
     expect(frames).toEqual([]);
     expect(rest).toBe('event: job\r\ndata: pas-encore-fini');
+  });
+});
+
+describe('errorMessageFromBody', () => {
+  it('retourne un detail texte tel quel', () => {
+    expect(errorMessageFromBody({ detail: 'Dossier hors racines autorisées' }, 400)).toBe(
+      'Dossier hors racines autorisées',
+    );
+  });
+
+  it('rend lisible la liste de validation pydantic d\'un 422 (jamais [object Object])', () => {
+    const body = {
+      detail: [
+        { loc: ['body', 'url'], msg: 'Field required', type: 'missing' },
+        { loc: ['body', 'cookies'], msg: 'Input should be a valid list', type: 'list_type' },
+      ],
+    };
+    const message = errorMessageFromBody(body, 422);
+    expect(message).toBe('Requête invalide — url : Field required ; cookies : Input should be a valid list');
+    expect(message).not.toContain('[object Object]');
+  });
+
+  it('retombe sur un message générique pour un corps inattendu', () => {
+    expect(errorMessageFromBody(null, 500)).toBe('Erreur serveur (500).');
+    expect(errorMessageFromBody({ detail: [] }, 422)).toBe('Erreur serveur (422).');
   });
 });
 

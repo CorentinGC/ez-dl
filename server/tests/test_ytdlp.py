@@ -94,3 +94,37 @@ def test_suggested_filename_is_sanitized_and_has_extension() -> None:
     name = suggested_filename(SAMPLE_INFO)
     assert name.endswith(".mp4")
     assert "/" not in name
+
+
+def test_last_line_drops_cookie_jar_warnings() -> None:
+    """yt-dlp recopie la ligne fautive du cookie-jar dans un avertissement : elle contient
+    des cookies en clair et ne doit jamais atteindre `job.error` ni les logs."""
+    from app.core.ytdlp import _last_line
+
+    # L'avertissement est la DERNIÈRE ligne : sans filtrage, c'est lui qui serait remonté.
+    stderr = (
+        b"ERROR: [generic] Unable to download webpage\n"
+        b"WARNING: skipping cookie file entry due to invalid format: "
+        b"'.example.com\\tTRUE\\t/\\tTRUE\\t0\\tauth_token\\ts3cr3t'\n"
+    )
+
+    message = _last_line(stderr)
+
+    assert "s3cr3t" not in message
+    assert message == "ERROR: [generic] Unable to download webpage"
+
+
+def test_last_line_falls_back_when_only_cookie_warnings() -> None:
+    """Si tout le stderr est filtré, on ne remonte rien plutôt qu'une ligne de cookies."""
+    from app.core.ytdlp import _last_line
+
+    stderr = b"WARNING: skipping cookie file entry due to x: '.example.com\\tauth\\ts3cr3t'\n"
+
+    assert _last_line(stderr) == "erreur inconnue"
+
+
+def test_last_line_is_truncated() -> None:
+    """Un stderr verbeux ne doit pas remplir la base ni les logs."""
+    from app.core.ytdlp import _last_line
+
+    assert len(_last_line(b"ERROR: " + b"x" * 5000)) == 500

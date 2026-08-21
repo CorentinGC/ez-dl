@@ -21,6 +21,28 @@ from app.db import get_engine, init_db
 
 logger = logging.getLogger(__name__)
 
+# Durée pendant laquelle le bandeau du mot de passe généré reste seul à l'écran avant que
+# la suite du démarrage (et ses logs) ne reprenne.
+_GENERATED_PASSWORD_PAUSE_SECONDS = 5
+
+
+def _announce_generated_password(password: str) -> None:
+    """Affiche le mot de passe généré dans un bandeau isolé, en `print` direct (pas via logging :
+    le bandeau doit sortir quel que soit `EZDL_LOG_LEVEL`)."""
+    line = "═" * 68
+    print(
+        f"\n{line}\n"
+        "  EZDL_PASSWORD non défini — mot de passe généré pour cette session :\n"
+        f"\n      {password}\n\n"
+        "  • Régénéré à CHAQUE démarrage tant que EZDL_PASSWORD n'est pas\n"
+        "    défini (.env ou variable d'environnement). Pour un mot de passe\n"
+        "    stable : EZDL_PASSWORD=<valeur> puis redémarrer.\n"
+        "  • Ce mot de passe reste lisible via `docker logs` : définir\n"
+        "    EZDL_PASSWORD puis recréer le conteneur pour l'en retirer.\n"
+        f"{line}\n",
+        flush=True,
+    )
+
 
 def _configure_logging(level: str) -> None:
     """Configure le logging standard selon `EZDL_LOG_LEVEL`."""
@@ -73,6 +95,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialise l'état applicatif au démarrage, lance l'auto-update yt-dlp et les workers."""
     settings = get_settings()
     _configure_logging(settings.log_level)
+
+    if settings.is_password_generated:
+        _announce_generated_password(settings.password)
+        # Laisse le bandeau seul à l'écran quelques secondes avant les logs de bootstrap.
+        await asyncio.sleep(_GENERATED_PASSWORD_PAUSE_SECONDS)
 
     job_queue = await _bootstrap_state(app, settings)
 

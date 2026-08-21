@@ -157,7 +157,7 @@ Tous les réglages serveur sont des variables d'environnement préfixées `EZDL_
 
 | Variable                            | Défaut                    | Rôle                                                                                                |
 | ------------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `EZDL_PASSWORD`                      | *(requis, pas de défaut)* | Mot de passe d'accès à l'API. Le serveur refuse de démarrer s'il est absent ou vide.                  |
+| `EZDL_PASSWORD`                      | *(recommandé)* | Mot de passe d'accès à l'API. Si absent ou vide, le serveur génère un mot de passe fort (32 caractères URL-safe) à chaque démarrage, l'affiche dans la console avec une pause de 5 secondes, puis démarre. Définiez-le dans `.env` pour un mot de passe stable. |
 | `EZDL_HOST`                          | `0.0.0.0`                  | Adresse d'écoute uvicorn                                                                               |
 | `EZDL_PORT`                          | `8000`                     | Port HTTP                                                                                               |
 | `EZDL_DOWNLOAD_ROOTS`                | `Downloads=/data/downloads` | Racines de destination autorisées, format `Label=/chemin` séparé par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. |
@@ -181,9 +181,7 @@ EZDL_DOWNLOAD_ROOTS=Movies=/mnt/media/movies,Shows=/mnt/media/shows,Downloads=/m
 
 ## Sécurité
 
-- **Un mot de passe est toujours requis.** Le serveur ne démarre pas sans `EZDL_PASSWORD` défini —
-  il n'existe aucun mode "sans authentification". L'extension l'envoie via
-  `Authorization: Bearer <EZDL_PASSWORD>` sur chaque requête sauf `/api/health`.
+- **L'authentification est toujours requise.** Si `EZDL_PASSWORD` n'est pas défini, le serveur génère un mot de passe fort (32 caractères) à chaque démarrage, l'affiche dans un bandeau isolé de la console avec une pause de 5 secondes, puis démarre normalement — récupérez ce mot de passe dans les logs de démarrage. Il n'existe pas de mode "sans authentification". Pour un mot de passe stable, définiez `EZDL_PASSWORD` dans `.env`. L'extension l'envoie en `Authorization: Bearer <EZDL_PASSWORD>` sur chaque requête sauf `/api/health`.
 - **N'exposez pas le serveur directement sur Internet.** Si vous avez besoin d'un accès distant,
   placez un reverse proxy avec TLS devant. Exemples minimaux :
 

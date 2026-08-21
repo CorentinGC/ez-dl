@@ -138,7 +138,16 @@ async def probe(
 ) -> dict[str, Any]:
     """Interroge yt-dlp (`-J`) pour une URL et retourne le JSON d'info normalisé
     (`formats`, `best_format_id`, `suggested_filename` inclus)."""
-    args = [binary, "-J", "--no-warnings", *_context_args(cookies_file, headers, referer), url]
+    # `--` sépare les options des arguments positionnels : sans lui, une URL commençant par
+    # `-` serait parsée par yt-dlp comme une option (`--exec`, `--paths`...).
+    args = [
+        binary,
+        "-J",
+        "--no-warnings",
+        *_context_args(cookies_file, headers, referer),
+        "--",
+        url,
+    ]
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -182,7 +191,8 @@ async def start_download(
     if format_id:
         args += ["-f", format_id]
     args += _context_args(cookies_file, headers, referer)
-    args.append(url)
+    # Voir `probe` : `--` empêche qu'une URL en `-...` soit interprétée comme une option.
+    args += ["--", url]
     return await asyncio.create_subprocess_exec(
         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
@@ -215,10 +225,25 @@ async def wait_download(process: asyncio.subprocess.Process) -> None:
     raise YtDlpError(f"yt-dlp a échoué (code {returncode}) : {_last_line(stderr)}")
 
 
+# yt-dlp recopie la ligne fautive du cookie-jar dans cet avertissement (non supprimé par
+# `--no-warnings`) : elle contient des cookies en clair et ne doit ni être loggée ni persistée.
+_COOKIE_LEAK_MARKER = "skipping cookie file entry"
+
+# Un message d'erreur est destiné à l'UI : au-delà, c'est du bruit en base et dans les logs.
+_MAX_ERROR_LENGTH = 500
+
+
 def _last_line(raw: bytes) -> str:
-    """Retourne la dernière ligne non vide d'une sortie process (pour message d'erreur)."""
-    lines = [line for line in raw.decode("utf-8", errors="replace").strip().splitlines() if line]
-    return lines[-1] if lines else "erreur inconnue"
+    """Retourne la dernière ligne non vide d'une sortie process (pour message d'erreur),
+    expurgée des lignes susceptibles de contenir des cookies et tronquée."""
+    lines = [
+        line
+        for line in raw.decode("utf-8", errors="replace").strip().splitlines()
+        if line and _COOKIE_LEAK_MARKER not in line
+    ]
+    if not lines:
+        return "erreur inconnue"
+    return lines[-1][:_MAX_ERROR_LENGTH]
 
 
 async def update(binary: str = "yt-dlp", *, timeout: float = 120.0) -> str:

@@ -103,6 +103,108 @@ export function groupSegmentsByPlaylist(candidates: MediaCandidate[]): MediaCand
   });
 }
 
+/**
+ * Écrase les playlists « variantes » sous leur master : une playlist HLS/DASH dont le
+ * répertoire est un descendant strict du répertoire d'une autre playlist du même onglet
+ * est une déclinaison de qualité (ex : `…/pl/avc1/720x1280/x.m3u8` sous `…/pl/master.m3u8`).
+ * Le master suffit : yt-dlp y retrouve toutes les qualités.
+ */
+export function collapseVariantPlaylists(candidates: MediaCandidate[]): MediaCandidate[] {
+  const playlistDirs = candidates
+    .filter((c) => c.kind === 'hls' || c.kind === 'dash')
+    .map((c) => directoryOf(c.url));
+  return candidates.filter((c) => {
+    if (c.kind !== 'hls' && c.kind !== 'dash') return true;
+    const dir = directoryOf(c.url);
+    return !playlistDirs.some((other) => other !== dir && dir.startsWith(other));
+  });
+}
+
+/** Une déclinaison de qualité d'un même flux progressif (mp4/webm). */
+export interface QualityVariant {
+  url: string;
+  /** Libellé lisible, tiré du segment de qualité de l'URL (ex : `720x1280`, `1080p`). */
+  label: string;
+}
+
+/** Candidat éventuellement porteur de ses déclinaisons de qualité regroupées. */
+export type GroupedCandidate = MediaCandidate & { qualityVariants?: QualityVariant[] };
+
+const RESOLUTION_SEGMENT = /^(\d{2,4})x(\d{2,4})$/;
+const QUALITY_SEGMENT = /^(\d{3,4})p$/;
+
+/** Hauteur en pixels déduite d'un segment de qualité, ou `null` si le segment n'en est pas un. */
+function qualityHeightOf(segment: string): number | null {
+  const resolution = RESOLUTION_SEGMENT.exec(segment);
+  if (resolution) return Math.min(Number(resolution[1]), Number(resolution[2]));
+  const quality = QUALITY_SEGMENT.exec(segment);
+  return quality ? Number(quality[1]) : null;
+}
+
+/** Clé de groupe d'un flux progressif : chemin avec segments de qualité et nom de fichier
+ * neutralisés. `null` si l'URL ne porte aucun segment de qualité (rien à regrouper). */
+function variantGroupKey(url: string): { key: string; label: string; height: number } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const segments = parsed.pathname.split('/');
+  const fileName = segments.pop() ?? '';
+  const extension = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : '';
+  let label: string | null = null;
+  let height = 0;
+  const neutralized = segments.map((segment) => {
+    const segmentHeight = qualityHeightOf(segment);
+    if (segmentHeight === null) return segment;
+    label = segment;
+    height = segmentHeight;
+    return '*';
+  });
+  if (label === null) return null;
+  return { key: `${parsed.origin}${neutralized.join('/')}/*${extension}`, label, height };
+}
+
+/**
+ * Regroupe les déclinaisons de résolution/bitrate d'un même flux progressif (mp4/webm) en
+ * un seul candidat (la meilleure qualité), porteur de la liste complète `qualityVariants`
+ * pour laisser le choix dans l'UI. Les candidats sans segment de qualité restent tels quels.
+ */
+export function groupQualityVariants(candidates: MediaCandidate[]): GroupedCandidate[] {
+  const groups = new Map<string, Array<{ candidate: MediaCandidate; label: string; height: number }>>();
+  const passthrough: GroupedCandidate[] = [];
+
+  for (const candidate of candidates) {
+    const isProgressive = candidate.kind === 'mp4' || candidate.kind === 'webm';
+    const group = isProgressive ? variantGroupKey(candidate.url) : null;
+    if (!group) {
+      passthrough.push(candidate);
+      continue;
+    }
+    const entries = groups.get(group.key) ?? [];
+    entries.push({ candidate, label: group.label, height: group.height });
+    groups.set(group.key, entries);
+  }
+
+  const grouped: GroupedCandidate[] = [];
+  for (const entries of groups.values()) {
+    const sorted = [...entries].sort((a, b) => b.height - a.height);
+    const best = sorted[0];
+    if (!best) continue;
+    if (sorted.length === 1) {
+      grouped.push(best.candidate);
+      continue;
+    }
+    grouped.push({
+      ...best.candidate,
+      qualityVariants: sorted.map((e) => ({ url: e.candidate.url, label: e.label })),
+    });
+  }
+
+  return [...passthrough, ...grouped];
+}
+
 /** Clé de déduplication : origine + chemin, sans les paramètres de requête (cache-busting…). */
 function dedupeKey(url: string): string {
   try {

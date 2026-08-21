@@ -1,21 +1,20 @@
 /**
- * Lecture des cookies du navigateur pour une URL donnée, sérialisés au format Netscape
- * (yt-dlp). Partagé entre `useSources` (probe authentifié) et `SourceCard` (job authentifié).
+ * Lecture des cookies du navigateur pour une URL donnée, au format structuré `CookieParam`
+ * attendu par le serveur (schéma `CookieItem` — c'est lui qui écrit le cookie-jar yt-dlp).
+ * Partagé entre `useSources` (probe authentifié) et `SourceCard` (job authentifié).
  */
 
-import { formatNetscapeCookies } from '@/src/lib/cookies';
+import type { CookieParam } from '@/src/lib/types';
 
-export async function readCookiesForUrl(url: string): Promise<string> {
+export async function readCookiesForUrl(url: string): Promise<CookieParam[]> {
   const cookies = await browser.cookies.getAll({ url });
-  return formatNetscapeCookies(
-    cookies.map((c) => ({
-      domain: c.domain,
-      path: c.path,
-      secure: c.secure,
-      expirationDate: c.expirationDate,
-      name: c.name,
-      value: c.value,
-      hostOnly: c.hostOnly,
-    })),
-  );
+  return cookies.map((c) => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    expires: c.expirationDate ?? null,
+  }));
 }

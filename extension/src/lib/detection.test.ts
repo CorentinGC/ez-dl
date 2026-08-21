@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   applySiteRules,
   classifyUrl,
+  collapseVariantPlaylists,
   correlatePickedElement,
   dedupeCandidates,
   generalizeUrlPattern,
+  groupQualityVariants,
   groupSegmentsByPlaylist,
   isHlsSegment,
   isMediaUrl,
@@ -307,5 +309,77 @@ describe('generalizeUrlPattern', () => {
   it('laisse un chemin purement littéral (aucun identifiant variable) inchangé', () => {
     const url = 'https://cdn.example.com/hls/master.m3u8';
     expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/hls/master.m3u8');
+  });
+});
+
+describe('collapseVariantPlaylists', () => {
+  it('écrase les playlists variantes sous leur master (cas x.com)', () => {
+    const master = candidate({ url: 'https://video.twimg.com/amplify_video/123/pl/abc.m3u8' });
+    const candidates = [
+      master,
+      candidate({ url: 'https://video.twimg.com/amplify_video/123/pl/avc1/320x568/d.m3u8' }),
+      candidate({ url: 'https://video.twimg.com/amplify_video/123/pl/avc1/720x1280/e.m3u8' }),
+    ];
+    expect(collapseVariantPlaylists(candidates)).toEqual([master]);
+  });
+
+  it('conserve deux masters de répertoires distincts et les flux non-playlist', () => {
+    const candidates = [
+      candidate({ url: 'https://cdn.example.com/videos/1/master.m3u8' }),
+      candidate({ url: 'https://cdn.example.com/videos/2/master.m3u8' }),
+      candidate({ url: 'https://cdn.example.com/videos/1/direct.mp4', kind: 'mp4' }),
+    ];
+    expect(collapseVariantPlaylists(candidates)).toEqual(candidates);
+  });
+});
+
+describe('groupQualityVariants', () => {
+  it('regroupe les déclinaisons de résolution mp4 en une entrée, meilleure qualité en tête', () => {
+    const low = candidate({ url: 'https://video.twimg.com/ext_tw_video/9/pu/vid/avc1/320x568/aa.mp4', kind: 'mp4' });
+    const high = candidate({ url: 'https://video.twimg.com/ext_tw_video/9/pu/vid/avc1/720x1280/bb.mp4', kind: 'mp4' });
+    const mid = candidate({ url: 'https://video.twimg.com/ext_tw_video/9/pu/vid/avc1/480x852/cc.mp4', kind: 'mp4' });
+
+    const grouped = groupQualityVariants([low, high, mid]);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]?.url).toBe(high.url);
+    expect(grouped[0]?.qualityVariants).toEqual([
+      { url: high.url, label: '720x1280' },
+      { url: mid.url, label: '480x852' },
+      { url: low.url, label: '320x568' },
+    ]);
+  });
+
+  it('reconnaît les segments de qualité en NNNp', () => {
+    const grouped = groupQualityVariants([
+      candidate({ url: 'https://cdn.example.com/v/1080p/video.mp4', kind: 'mp4' }),
+      candidate({ url: 'https://cdn.example.com/v/480p/video.mp4', kind: 'mp4' }),
+    ]);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]?.qualityVariants?.map((v) => v.label)).toEqual(['1080p', '480p']);
+  });
+
+  it('ne regroupe pas des vidéos différentes ni les URLs sans segment de qualité', () => {
+    const candidates = [
+      candidate({ url: 'https://video.twimg.com/ext_tw_video/1/pu/vid/avc1/720x1280/aa.mp4', kind: 'mp4' }),
+      candidate({ url: 'https://video.twimg.com/ext_tw_video/2/pu/vid/avc1/720x1280/bb.mp4', kind: 'mp4' }),
+      candidate({ url: 'https://cdn.example.com/videos/plain.mp4', kind: 'mp4' }),
+      candidate({ url: 'https://cdn.example.com/videos/other.webm', kind: 'webm' }),
+    ];
+    const grouped = groupQualityVariants(candidates);
+    expect(grouped).toHaveLength(4);
+    expect(grouped.every((c) => !c.qualityVariants)).toBe(true);
+  });
+
+  it('laisse les playlists HLS hors du regroupement progressif', () => {
+    const hls = candidate({ url: 'https://cdn.example.com/v/720x1280/media.m3u8' });
+    expect(groupQualityVariants([hls])).toEqual([hls]);
+  });
+
+  it('une seule déclinaison connue -> pas de dropdown (pas de qualityVariants)', () => {
+    const single = candidate({ url: 'https://cdn.example.com/v/720x1280/only.mp4', kind: 'mp4' });
+    const grouped = groupQualityVariants([single]);
+    expect(grouped).toEqual([single]);
+    expect(grouped[0]?.qualityVariants).toBeUndefined();
   });
 });

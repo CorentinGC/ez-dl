@@ -26,11 +26,15 @@ linters/scanners) pour vérifier des hypothèses, mais **tu ne modifies jamais a
 
 1. **Authentification** : toutes les routes non publiques (tout sauf `/api/health`) exigent
    `Authorization: Bearer <EZDL_PASSWORD>` via une dépendance FastAPI unique, comparaison
-   **constant-time** (`secrets.compare_digest`, pas `==`). Le serveur doit refuser de démarrer si
-   `EZDL_PASSWORD` est vide/absent.
-2. **Injection de commande** : tout appel subprocess vers `yt-dlp`/`ffmpeg` doit utiliser une liste
-   d'arguments, jamais `shell=True` ni de concaténation de chaîne shell. Rechercher spécifiquement
-   `shell=True`, `os.system`, `os.popen`, interpolation de variables utilisateur dans une commande.
+   **constant-time** (`secrets.compare_digest` sur des `bytes`, pas `==`). Si `EZDL_PASSWORD` est
+   vide/absent, le serveur génère un mot de passe fort et l'affiche au démarrage (ADR 0003 amendé
+   par `ez-dl-5jw`) : vérifier qu'aucun chemin ne laisse passer une requête sans mot de passe
+   valide, pas que le serveur refuse de démarrer.
+2. **Injection de commande ET d'arguments** : tout appel subprocess vers `yt-dlp`/`ffmpeg` doit
+   utiliser une liste d'arguments, jamais `shell=True` ni de concaténation de chaîne shell.
+   Rechercher `shell=True`, `os.system`, `os.popen`, interpolation de variables utilisateur.
+   **Vérifier aussi le `--` avant tout argument positionnel d'origine utilisateur** : une URL en
+   `-...` devient sinon une option (`--exec`, `--paths`), ce qui contourne la validation de chemins.
 3. **Path traversal** : `/api/folders` et la résolution du dossier de destination des jobs doivent
    `Path.resolve()` puis vérifier l'appartenance à une racine `EZDL_DOWNLOAD_ROOTS` déclarée, sinon
    `400`. Vérifier l'absence de contournement via `..`, liens symboliques, chemins absolus injectés.

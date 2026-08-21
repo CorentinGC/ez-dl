@@ -76,9 +76,13 @@ serveur FastAPI/yt-dlp/ffmpeg dans Docker).
   longueur.
 - **Cookies** reçus de l'extension : écrits dans un fichier temporaire à permissions `0600`,
   supprimé après le job. Jamais loggés.
-- **Mot de passe** (`EZDL_PASSWORD`) : comparaison **constant-time** (`secrets.compare_digest`),
-  obligatoire sur toutes les routes sauf `/api/health`. Jamais loggé. Le serveur refuse de démarrer
-  si absent/vide.
+- **Mot de passe** (`EZDL_PASSWORD`) : comparaison **constant-time** (`secrets.compare_digest`, sur
+  des `bytes`), obligatoire sur toutes les routes sauf `/api/health`. Jamais loggé. Si `EZDL_PASSWORD`
+  est absent/vide, le serveur **génère** un mot de passe fort au démarrage et l'affiche dans un
+  bandeau console — il n'existe aucun mode « sans authentification » (ADR 0003, amendé par
+  `ez-dl-5jw`).
+- **URL passées à yt-dlp** : toujours précédées d'un `--` dans la liste d'arguments, et validées
+  `http`/`https` côté schéma — sinon une URL en `-...` devient une option (`--exec`, `--paths`).
 
 ## Parallélisation des subagents
 
@@ -123,6 +127,10 @@ read-only du code pour préserver le contexte des autres agents.
 - `bd ready --json` en début de tâche pour lister le travail disponible.
 - `bd update <id> --claim` avant de commencer à travailler sur une issue.
 - `bd close <id> --reason "..."` à la fin, avec une raison explicite.
+- **Commit après chaque issue fermée** : une issue beads = un commit. Fermer l'issue puis
+  committer immédiatement le travail correspondant (lint + tests verts d'abord), en référençant
+  l'identifiant dans le message (`fix(server): ... (ez-dl-xxx)`). Ne pas accumuler plusieurs
+  issues dans un lot non commité. Le `git push` reste soumis à validation explicite.
 - Remplace `TodoWrite` : ne pas créer de TODO markdown parallèle tant que beads est actif.
 
 Issues existantes : `ez-dl-k4g` (config agent), `ez-dl-txh` (équipe agents), `ez-dl-rv2`

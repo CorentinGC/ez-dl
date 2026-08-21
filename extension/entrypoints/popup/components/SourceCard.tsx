@@ -35,6 +35,8 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
   const defaultFormatId = isProbe ? (source.bestFormatId ?? formats[0]?.format_id ?? null) : null;
 
   const [formatId, setFormatId] = useState<string | null>(defaultFormatId);
+  // Flux sniffé : URL effectivement téléchargée, modifiable via le choix de qualité.
+  const [sniffedUrl, setSniffedUrl] = useState<string | null>(isProbe ? null : source.mediaUrl);
   const [filename, setFilename] = useState(() => computeDefaultFilename(source, pageTitle, defaultFormatId));
   const [folder, setFolder] = useState<{ path: string; label: string } | null>(defaultFolder(settings));
   const [presetId, setPresetId] = useState<string>(settings.defaultPresetId ?? presets[0]?.id ?? 'copy');
@@ -52,7 +54,7 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
     try {
       const cookies = sendCookies ? await readCookiesForUrl(pageUrl) : undefined;
       await apiClient.createJob({
-        url: source.kind === 'probe' ? source.pageUrl : source.mediaUrl,
+        url: source.kind === 'probe' ? source.pageUrl : (sniffedUrl ?? source.mediaUrl),
         format_id: source.kind === 'probe' && formatId ? formatId : undefined,
         folder: folder.path,
         filename: sanitizeFilename(filename),
@@ -66,7 +68,7 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
     } catch (err) {
       setSubmit({ status: 'error', message: err instanceof Error ? err.message : 'Erreur inconnue.' });
     }
-  }, [apiClient, filename, folder, formatId, onDownloaded, pageUrl, presetId, sendCookies, source]);
+  }, [apiClient, filename, folder, formatId, onDownloaded, pageUrl, presetId, sendCookies, sniffedUrl, source]);
 
   const thumbnail = source.kind === 'probe' ? source.thumbnail : null;
 
@@ -124,6 +126,26 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
                 {formats.map((format) => (
                   <option key={format.format_id} value={format.format_id}>
                     {format.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {source.kind === 'sniffed' && (source.qualityVariants?.length ?? 0) > 1 ? (
+            <div className="field">
+              <label className="field-label" htmlFor={`quality-${idBase}`}>
+                Qualité
+              </label>
+              <select
+                id={`quality-${idBase}`}
+                className="field-select"
+                value={sniffedUrl ?? source.mediaUrl}
+                onChange={(event) => setSniffedUrl(event.target.value)}
+              >
+                {source.qualityVariants?.map((variant) => (
+                  <option key={variant.url} value={variant.url}>
+                    {variant.label}
                   </option>
                 ))}
               </select>

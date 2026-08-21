@@ -77,16 +77,36 @@ export function toApiConfig(settings: Pick<ExtensionSettings, 'serverUrl' | 'pas
   return { baseUrl: settings.serverUrl, password: settings.password };
 }
 
+/**
+ * Extrait un message lisible du corps d'erreur FastAPI. Le `detail` d'un 422 est une LISTE
+ * d'objets de validation pydantic : la stringifier telle quelle donnerait `[object Object]`.
+ */
+export function errorMessageFromBody(data: unknown, status: number): string {
+  if (data && typeof data === 'object' && 'detail' in data) {
+    const detail = (data as { detail: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      const items = detail
+        .filter((item): item is { loc?: unknown[]; msg?: unknown } => !!item && typeof item === 'object')
+        .map((item) => {
+          const field = Array.isArray(item.loc) ? item.loc.filter((l) => l !== 'body').join('.') : '';
+          const msg = typeof item.msg === 'string' ? item.msg : 'valeur invalide';
+          return field ? `${field} : ${msg}` : msg;
+        });
+      if (items.length > 0) return `Requête invalide — ${items.join(' ; ')}`;
+    }
+  }
+  return `Erreur serveur (${status}).`;
+}
+
 async function safeReadErrorMessage(response: Response): Promise<string> {
   try {
     const data: unknown = await response.clone().json();
-    if (data && typeof data === 'object' && 'detail' in data) {
-      return String((data as { detail: unknown }).detail);
-    }
+    return errorMessageFromBody(data, response.status);
   } catch {
-    // Corps non JSON ou vide : on retombe sur un message générique ci-dessous.
+    // Corps non JSON ou vide : message générique.
+    return `Erreur serveur (${response.status}).`;
   }
-  return `Erreur serveur (${response.status}).`;
 }
 
 async function request<T>(config: ApiClientConfig, path: string, init: RequestInit = {}): Promise<T> {
@@ -197,11 +217,12 @@ export function createApiClient(config: ApiClientConfig) {
     /** Sonde une URL sans contexte d'authentification (page publique). */
     probe: (url: string) => request<ProbeResponse>(config, `/api/probe?url=${encodeURIComponent(url)}`),
 
-    /** Sonde une URL avec cookies/headers/referer (page authentifiée). */
-    probeWithContext: (url: string, body: ProbeRequestBody) =>
-      request<ProbeResponse>(config, `/api/probe?url=${encodeURIComponent(url)}`, {
+    /** Sonde une URL avec cookies/headers/referer (page authentifiée). L'URL voyage dans le
+     * corps : la variante POST du serveur ne lit pas la query. */
+    probeWithContext: (url: string, context: Omit<ProbeRequestBody, 'url'>) =>
+      request<ProbeResponse>(config, '/api/probe', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ url, ...context } satisfies ProbeRequestBody),
       }),
 
     listFolders: (path?: string) =>

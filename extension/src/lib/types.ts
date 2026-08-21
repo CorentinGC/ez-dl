@@ -73,9 +73,21 @@ export interface ProbeResponse {
   suggested_filename: string | null;
 }
 
-/** Corps optionnel du POST /api/probe (pages authentifiées). */
+/** Un cookie transmis au serveur (miroir du schéma `CookieItem` côté FastAPI). */
+export interface CookieParam {
+  name: string;
+  value: string;
+  domain: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  expires?: number | null;
+}
+
+/** Corps du POST /api/probe (pages authentifiées) — l'URL voyage dans le corps, pas en query. */
 export interface ProbeRequestBody {
-  cookies?: string;
+  url: string;
+  cookies?: CookieParam[];
   headers?: Record<string, string>;
   referer?: string;
 }
@@ -144,7 +156,7 @@ export interface CreateJobRequest {
   folder: string;
   filename?: string;
   preset_id?: string;
-  cookies?: string;
+  cookies?: CookieParam[];
   headers?: Record<string, string>;
   referer?: string;
   title?: string;

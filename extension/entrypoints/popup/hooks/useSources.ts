@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createApiClient, NetworkError, ServerError, UnauthorizedError, toApiConfig } from '@/src/lib/api';
+import { collapseVariantPlaylists, groupQualityVariants } from '@/src/lib/detection';
 import type { GetTabStateRequest, GetTabStateResponse } from '@/src/lib/messaging';
 import type { ExtensionSettings, PickedElementInfo, ProbeResponse } from '@/src/lib/types';
 import { readCookiesForUrl } from '../readCookies';
@@ -80,10 +81,19 @@ async function loadSources(settings: ExtensionSettings, tab: ActiveTabInfo): Pro
 
   // Flux réseau "non couverts" par le probe : on ne les ajoute que si aucun extracteur yt-dlp
   // n'a été trouvé (sinon, ce sont généralement des segments/représentations du même flux).
+  // Présentation : playlists variantes écrasées sous leur master, et déclinaisons de
+  // résolution d'un même flux progressif regroupées en une entrée avec choix de qualité.
   if (!probeCoversTab) {
     const pageTitle = tabState.pageInfo?.pageTitle || tab.title;
-    for (const candidate of tabState.candidates) {
-      sources.push({ kind: 'sniffed', mediaUrl: candidate.url, mediaKind: candidate.kind, title: pageTitle });
+    const candidates = groupQualityVariants(collapseVariantPlaylists(tabState.candidates));
+    for (const candidate of candidates) {
+      sources.push({
+        kind: 'sniffed',
+        mediaUrl: candidate.url,
+        mediaKind: candidate.kind,
+        title: pageTitle,
+        qualityVariants: candidate.qualityVariants,
+      });
     }
   }
 
