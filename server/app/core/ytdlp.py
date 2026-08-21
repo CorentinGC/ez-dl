@@ -184,11 +184,17 @@ async def start_download(
     substitue les champs `%(...)s` et impose l'extension du conteneur réellement produit
     (un merge/remux peut changer le conteneur en cours de route). L'appelant doit donc
     retrouver le fichier produit après coup plutôt que de présumer son nom.
+
+    `--continue` reprend le `.part` déjà présent dans le dossier de sortie au lieu de tout
+    retélécharger : c'est ce qui rend la reprise d'un job en pause (ou coupé par un
+    redémarrage du serveur) possible. C'est le défaut de yt-dlp, explicité ici parce que le
+    pipeline en dépend.
     """
     args = [
         binary,
         "--newline",
         "--no-warnings",
+        "--continue",
         "--progress-template",
         PROGRESS_TEMPLATE,
         "-o",

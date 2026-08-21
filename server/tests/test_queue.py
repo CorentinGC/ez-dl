@@ -1,7 +1,9 @@
-"""Tests de `app.core.queue` : progression numérique et pipeline complet d'un job."""
+"""Tests de `app.core.queue` : progression numérique, pipeline complet d'un job,
+pause/reprise et récupération après un redémarrage du serveur."""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +12,7 @@ from sqlmodel import Session
 
 from app.config import Settings
 from app.core import ytdlp
-from app.core.queue import JobQueue, _progress_fields
+from app.core.queue import INTERRUPTED_MESSAGE, JobQueue, _progress_fields
 from app.db import get_engine, init_db
 from app.models import Job, JobStatus
 
@@ -88,12 +90,18 @@ def _create_job(engine, settings, filename: str = "video.mp4") -> str:
         return job.id
 
 
-def _install_fake_ytdlp(monkeypatch, produced: dict[str, bytes], progress=None) -> list[Path]:
+def _install_fake_ytdlp(
+    monkeypatch,
+    produced: dict[str, bytes],
+    progress=None,
+    seen_files: list[list[str]] | None = None,
+) -> list[Path]:
     """Simule yt-dlp : écrit `produced` (nom -> contenu) dans le dossier du template `-o`.
 
     Le vrai binaire choisit lui-même le nom de sortie (il impose l'extension du conteneur
     réellement produit) : le fake reçoit donc un template, pas un chemin final.
     Retourne la liste des dossiers de travail utilisés, pour vérifier leur nettoyage.
+    `seen_files` reçoit le contenu du dossier de travail *avant* écriture (état de reprise).
     """
     work_dirs: list[Path] = []
 
@@ -102,6 +110,8 @@ def _install_fake_ytdlp(monkeypatch, produced: dict[str, bytes], progress=None) 
         work_dirs.append(work_dir)
         assert "%(ext)s" in Path(output_template).name, "le nom de sortie ne doit pas être deviné"
         work_dir.mkdir(parents=True, exist_ok=True)
+        if seen_files is not None:
+            seen_files.append(sorted(path.name for path in work_dir.iterdir()))
         for name, content in produced.items():
             (work_dir / name).write_bytes(content)
         return SimpleNamespace(stdout=None, stderr=None, returncode=0, kill=lambda: None)
@@ -265,4 +275,166 @@ async def test_run_job_reports_error_when_ytdlp_produced_nothing(job_queue, monk
         assert persisted.error is not None and "aucun fichier" in persisted.error
 
     assert not (settings.roots[0].path / "video.mp4").exists()
-    assert work_dirs and not work_dirs[0].exists()
+    # Job en erreur : le dossier de travail survit pour qu'un retry reprenne le partiel.
+    assert work_dirs and work_dirs[0].exists()
+
+
+class _HangingProcess:
+    """Process yt-dlp factice qui ne rend la main qu'une fois signalé (SIGTERM/SIGKILL)."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.stdout = None
+        self.stderr = None
+        self._stopped = asyncio.Event()
+
+    def terminate(self) -> None:
+        self.returncode = -15
+        self._stopped.set()
+
+    def kill(self) -> None:
+        self.returncode = -9
+        self._stopped.set()
+
+    async def wait(self) -> int:
+        await self._stopped.wait()
+        return self.returncode or 0
+
+
+def _install_hanging_ytdlp(monkeypatch, seen_files: list[list[str]]) -> None:
+    """Simule un yt-dlp qui écrit un `.part` puis télécharge sans fin.
+
+    `seen_files` reçoit, à chaque lancement, le contenu du dossier de travail *avant* le
+    téléchargement : c'est ce qui prouve qu'une reprise retrouve bien le fichier partiel.
+    `stream_progress` et `wait_download` restent les vraies implémentations — c'est leur
+    échec sur un process signalé qui doit être traduit en pause, pas en erreur.
+    """
+
+    async def fake_start_download(url: str, output_template: Path, **kwargs: object):
+        work_dir = Path(output_template).parent
+        work_dir.mkdir(parents=True, exist_ok=True)
+        seen_files.append(sorted(path.name for path in work_dir.iterdir()))
+        (work_dir / "download.mp4.part").write_bytes(b"p" * 4_096)
+        return _HangingProcess()
+
+    monkeypatch.setattr(ytdlp, "start_download", fake_start_download)
+
+
+async def _wait_until_running(queue: JobQueue, job_id: str) -> None:
+    """Attend que le process du job soit enregistré (donc interruptible), sans `sleep` fixe."""
+    for _ in range(1_000):
+        if job_id in queue._processes:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("le process du job n'a jamais été enregistré")
+
+
+async def test_pause_suspends_job_and_keeps_the_partial_file(job_queue, monkeypatch) -> None:
+    """Pause d'un téléchargement en cours : statut `paused`, pas `error`, et le `.part` reste
+    sur place — sans lui la reprise repartirait de zéro."""
+    queue, engine, settings = job_queue
+    job_id = _create_job(engine, settings)
+    _install_hanging_ytdlp(monkeypatch, [])
+
+    task = asyncio.create_task(queue._run_job(job_id))
+    await _wait_until_running(queue, job_id)
+    queue.pause(job_id)
+    await task
+
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.PAUSED.value
+        assert persisted.error is None  # une pause n'est pas un échec
+        assert persisted.speed is None and persisted.eta is None
+
+    partial = queue.work_dir(job_id) / "download.mp4.part"
+    assert partial.exists()
+    assert partial.stat().st_size == 4_096
+
+
+async def test_resume_restarts_from_the_partial_file(job_queue, monkeypatch) -> None:
+    """Reprise après pause : yt-dlp est relancé dans le dossier de travail conservé, avec le
+    `.part` déjà présent."""
+    queue, engine, settings = job_queue
+    job_id = _create_job(engine, settings)
+    seen_files: list[list[str]] = []
+    _install_hanging_ytdlp(monkeypatch, seen_files)
+
+    task = asyncio.create_task(queue._run_job(job_id))
+    await _wait_until_running(queue, job_id)
+    queue.pause(job_id)
+    await task
+
+    # Reprise : ce que fait `POST /api/jobs/{id}/resume`.
+    queue.enqueue(job_id)
+    queue.update(job_id, status=JobStatus.QUEUED, error=None)
+    seen_on_resume: list[list[str]] = []
+    _install_fake_ytdlp(monkeypatch, {"download.mp4": b"complet"}, seen_files=seen_on_resume)
+    await queue._run_job(job_id)
+
+    # Le premier lancement démarre à vide, la reprise retrouve le fichier partiel.
+    assert seen_files == [[]]
+    assert seen_on_resume == [["download.mp4.part"]]
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.DONE.value
+    assert (settings.roots[0].path / "video.mp4").read_bytes() == b"complet"
+    # Job terminé : le dossier de travail est purgé, plus rien n'est reprenable.
+    assert not queue.work_dir(job_id).exists()
+
+
+async def test_cancel_discards_the_partial_file(job_queue, monkeypatch) -> None:
+    """Annulation (et non pause) : le dossier de travail part, un `retry` repartira de zéro."""
+    queue, engine, settings = job_queue
+    job_id = _create_job(engine, settings)
+    _install_hanging_ytdlp(monkeypatch, [])
+
+    task = asyncio.create_task(queue._run_job(job_id))
+    await _wait_until_running(queue, job_id)
+    queue.cancel(job_id)
+    await task
+
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.CANCELED.value
+    assert not queue.work_dir(job_id).exists()
+
+
+async def test_run_job_ignores_an_entry_whose_job_is_no_longer_queued(
+    job_queue, monkeypatch
+) -> None:
+    """Une reprise ré-enfile l'id sans pouvoir retirer l'entrée obsolète : le second passage
+    ne doit pas relancer un téléchargement déjà pris en charge."""
+    queue, engine, settings = job_queue
+    job_id = _create_job(engine, settings)
+    queue.update(job_id, status=JobStatus.PAUSED)
+    work_dirs = _install_fake_ytdlp(monkeypatch, {"download.mp4": b"x"})
+
+    await queue._run_job(job_id)
+
+    assert work_dirs == []  # yt-dlp n'a jamais été lancé
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.PAUSED.value
+
+
+def test_recover_interrupted_jobs_suspends_instead_of_erroring(job_queue) -> None:
+    """Redémarrage du serveur : un job en cours devient `paused` (donc reprenable) et porte
+    le motif de l'interruption, au lieu d'être classé en erreur définitive."""
+    queue, engine, settings = job_queue
+    job_id = _create_job(engine, settings)
+    queue.update(job_id, status=JobStatus.DOWNLOADING, speed=1_000.0, eta=42)
+
+    queue._recover_interrupted_jobs()
+
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.PAUSED.value
+        assert persisted.error == INTERRUPTED_MESSAGE
+        # Vitesse et ETA d'un job arrêté seraient trompeurs dans l'UI.
+        assert persisted.speed is None and persisted.eta is None

@@ -43,6 +43,11 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
       (cookie-jar hors tmpfs), `ez-dl-aml` (compare_digest bytes, caractères de contrôle,
       filtrage du stderr yt-dlp). Chaque correctif vérifié en red-green. 50 tests pytest.
 
+- [x] 2026-08-21 (nuit) : `ez-dl-a0u` pause / reprise / retry côté serveur — statut `paused`,
+      `POST /api/jobs/{id}/{pause,resume}`, dossier de travail conservé tant que le job est
+      reprenable, jobs coupés par un redémarrage suspendus au lieu d'être mis en erreur.
+      90 tests pytest, red-green vérifié par mutation du correctif.
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.
@@ -125,6 +130,16 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
   route). `-o <dir>/<id>.part` produit `<id>.part.mp4` → `[Errno 2]` à 100 % au moment du
   déplacement (`ez-dl-1i9`). Correctif : un dossier de travail par job + récupération du fichier
   réellement écrit (`_downloaded_file`), jamais un nom deviné.
+- **La reprise d'un téléchargement dépend de la persistance d'`EZDL_TEMP_DIR`** : c'est le `.part`
+  du dossier de travail qui permet à `yt-dlp --continue` de repartir de l'octet atteint. Monté en
+  tmpfs, il disparaît au redémarrage du conteneur → la reprise refait tout le téléchargement.
+- **Un arrêt demandé ressemble à une panne** : SIGTERM (pause) comme SIGKILL (annulation) font
+  échouer `wait_download` exactement comme une erreur réseau. Seuls les drapeaux
+  `_pause_requested`/`_cancel_requested` distinguent les trois cas — le code de retour, non.
+- **Le statut en base sert de jeton de prise d'un job** : une reprise ré-enfile l'id sans pouvoir
+  retirer l'entrée obsolète de la file asyncio. `_run_job` ignore donc tout job qui n'est plus
+  `queued`, et prend le job sans `await` entre la lecture du statut et son passage en
+  `downloading` (sinon deux workers exécuteraient le même job).
 - **SSE : sse-starlette émet des fins de ligne `\r\n`** : tout parsing côté client doit découper
   les frames sur `\r?\n\r?\n`, jamais sur `'\n\n'` littéral (bug corrigé dans `api.ts`).
 - **Chrome de marque ≥ 137 ne supporte plus `--load-extension`** : pour tester l'extension

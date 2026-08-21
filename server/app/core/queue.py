@@ -17,6 +17,7 @@ from app.config import Settings
 from app.core import ffmpeg, ytdlp
 from app.core.cookies import cookie_jar_file
 from app.core.paths import PathSecurityError, resolve_destination
+from app.core.workdir import atomic_move, downloaded_file, free_destination
 from app.models import Job, JobStatus, utcnow
 
 if TYPE_CHECKING:
@@ -30,6 +31,10 @@ _STUCK_STATUSES = [
     JobStatus.CONVERTING.value,
     JobStatus.MOVING.value,
 ]
+
+# Message porté par un job suspendu par un arrêt du serveur : la reprise est possible, ce
+# n'est donc pas une erreur, mais l'UI doit pouvoir expliquer pourquoi le job s'est arrêté.
+INTERRUPTED_MESSAGE = "Interrompu par un redémarrage du serveur"
 
 
 @dataclass
@@ -85,64 +90,6 @@ def _progress_fields(data: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
-# Résidus laissés par yt-dlp dans le dossier de travail (téléchargement partiel, état de
-# reprise, fragments) : jamais le fichier final, même quand ils survivent à un succès.
-_LEFTOVER_SUFFIXES = (".part", ".ytdl", ".temp")
-
-
-def _downloaded_file(work_dir: Path) -> Path:
-    """Retourne le fichier produit par yt-dlp dans son dossier de travail dédié.
-
-    Le nom de sortie n'est pas prédictible : yt-dlp impose l'extension du conteneur
-    réellement produit (un merge/remux peut la changer). On prend donc le plus gros
-    fichier restant, hors résidus.
-    """
-    # `is_file()` suit les liens : un symlink serait sélectionné puis déplacé tel quel vers
-    # la destination, où il pointerait hors des racines autorisées. yt-dlp n'en crée pas —
-    # c'est de la défense en profondeur.
-    candidates = [
-        path
-        for path in work_dir.iterdir()
-        if path.is_file()
-        and not path.is_symlink()
-        and not path.suffix.startswith(_LEFTOVER_SUFFIXES)
-    ]
-    if not candidates:
-        raise RuntimeError("yt-dlp n'a produit aucun fichier")
-    return max(candidates, key=lambda path: path.stat().st_size)
-
-
-# Au-delà, c'est que quelque chose tourne en rond : mieux vaut échouer que boucler.
-_MAX_DEDUPE_ATTEMPTS = 999
-
-
-def _free_destination(destination: Path) -> Path:
-    """Retourne `destination`, ou un nom libre dérivé (`film (2).mkv`) si elle est prise.
-
-    `os.rename` écrase la cible **sans erreur** : sur une bibliothèque média, un job dont le
-    nom coïncide avec un fichier existant le détruirait définitivement. On dérive donc un nom
-    libre, comme le fait un navigateur, plutôt que d'écraser.
-    """
-    if not destination.exists():
-        return destination
-    stem, suffix = destination.stem, destination.suffix
-    for index in range(2, _MAX_DEDUPE_ATTEMPTS + 2):
-        candidate = destination.with_name(f"{stem} ({index}){suffix}")
-        if not candidate.exists():
-            return candidate
-    raise OSError(f"Impossible de dériver un nom libre pour {destination.name}")
-
-
-def _atomic_move(source: Path, destination: Path) -> None:
-    """Déplace `source` vers `destination` ; repli sur une copie si périphérique différent."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        source.replace(destination)
-    except OSError:
-        shutil.copy2(source, destination)
-        source.unlink(missing_ok=True)
-
-
 class JobQueue:
     """Orchestre le pipeline `queued -> ... -> done/error/canceled` avec N workers."""
 
@@ -158,9 +105,10 @@ class JobQueue:
         self._workers: list[asyncio.Task[None]] = []
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._cancel_requested: set[str] = set()
+        self._pause_requested: set[str] = set()
 
     async def start(self) -> None:
-        """Démarre les workers et remet en erreur les jobs interrompus par un crash."""
+        """Démarre les workers et suspend les jobs interrompus par un arrêt du serveur."""
         self._recover_interrupted_jobs()
         for _ in range(max(1, self._settings.max_concurrent_jobs)):
             self._workers.append(asyncio.create_task(self._worker_loop()))
@@ -177,7 +125,13 @@ class JobQueue:
         self._workers.clear()
 
     def enqueue(self, job_id: str, context: JobContext | None = None) -> None:
-        """Place un job en file d'attente avec son contexte éphémère (cookies/headers)."""
+        """Place un job en file d'attente avec son contexte éphémère (cookies/headers).
+
+        Enfiler un job annule toute demande d'arrêt antérieure : sans cela, une reprise
+        héritée d'un drapeau de pause verrait son premier échec réel classé « suspendu ».
+        """
+        self._cancel_requested.discard(job_id)
+        self._pause_requested.discard(job_id)
         self._contexts[job_id] = context or JobContext()
         self._queue.put_nowait(job_id)
 
@@ -188,15 +142,42 @@ class JobQueue:
         if process is not None and process.returncode is None:
             process.kill()
 
+    def pause(self, job_id: str) -> None:
+        """Demande la suspension d'un job.
+
+        `terminate()` (SIGTERM) et non `kill()` : yt-dlp doit pouvoir laisser son `.part` et
+        son état de reprise en place, c'est ce fichier partiel qui évite de tout
+        retélécharger. Le dossier de travail n'est pas purgé pour un job suspendu.
+        """
+        self._pause_requested.add(job_id)
+        process = self._processes.get(job_id)
+        if process is not None and process.returncode is None:
+            process.terminate()
+
+    def work_dir(self, job_id: str) -> Path:
+        """Dossier de travail dédié à un job (fichier partiel, sortie de conversion)."""
+        return self._settings.temp_dir / job_id
+
+    def discard_work_dir(self, job_id: str) -> None:
+        """Supprime le dossier de travail d'un job : plus rien n'est reprenable ensuite."""
+        shutil.rmtree(self.work_dir(job_id), ignore_errors=True)
+
     def _recover_interrupted_jobs(self) -> None:
-        """Au démarrage, marque en erreur les jobs restés bloqués par un crash précédent."""
+        """Au démarrage, suspend les jobs restés en cours lors de l'arrêt précédent.
+
+        Ils passent en `paused` et non en `error` : leur fichier partiel est toujours dans
+        le dossier de travail, une reprise repartira de là (à condition qu'`EZDL_TEMP_DIR`
+        survive au redémarrage — voir docs/fr/setup.md).
+        """
         with Session(self._engine) as session:
             jobs = session.exec(select(Job).where(Job.status.in_(_STUCK_STATUSES))).all()
             if not jobs:
                 return
             for job in jobs:
-                job.status = JobStatus.ERROR
-                job.error = "Interrompu par un redémarrage du serveur"
+                job.status = JobStatus.PAUSED
+                job.error = INTERRUPTED_MESSAGE
+                job.speed = None
+                job.eta = None
                 job.updated_at = utcnow()
                 session.add(job)
             session.commit()
@@ -212,8 +193,22 @@ class JobQueue:
             finally:
                 self._processes.pop(job_id, None)
                 self._cancel_requested.discard(job_id)
+                self._pause_requested.discard(job_id)
                 self._contexts.pop(job_id, None)
                 self._queue.task_done()
+
+    def update(self, job_id: str, **fields: Any) -> Job | None:
+        """Applique des champs à un job depuis l'extérieur de la file (routes API).
+
+        Passe par la même diffusion SSE que le pipeline : un changement de statut décidé par
+        une route (pause d'un job encore en attente, reprise) doit atteindre les clients
+        abonnés exactement comme une mise à jour de progression.
+        """
+        with Session(self._engine) as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                return None
+            return self._update_job(session, job, **fields)
 
     def _update_job(self, session: Session, job: Job, **fields: Any) -> Job:
         """Applique des champs à un job, persiste et publie la mise à jour."""
@@ -237,41 +232,41 @@ class JobQueue:
         context = self._contexts.get(job_id, JobContext())
         with Session(self._engine) as session:
             job = session.get(Job, job_id)
-            if job is None:
+            # Le statut en base fait office de jeton de prise : une reprise ré-enfile l'id
+            # sans pouvoir retirer l'entrée obsolète de la file, et une annulation/pause
+            # d'un job encore en attente ne fait que changer son statut. Tout ce qui n'est
+            # plus `queued` a donc déjà été traité — ou ne doit pas l'être.
+            if job is None or job.status != JobStatus.QUEUED.value:
                 return
-            if job_id in self._cancel_requested:
-                self._update_job(session, job, status=JobStatus.CANCELED)
-                return
-
             if self._destination_or_error(session, job) is None:
                 return
+            # Aucun `await` entre la lecture du statut et cette écriture : deux workers ne
+            # peuvent pas prendre le même job.
+            job = self._update_job(session, job, status=JobStatus.DOWNLOADING, error=None)
 
             # Dossier de travail dédié : yt-dlp choisit lui-même le nom final du fichier,
-            # l'isoler permet de le retrouver sans le deviner. Supprimé quoi qu'il arrive.
-            work_dir = self._settings.temp_dir / job_id
-            try:
-                temp_path = await self._download_phase(session, job, context, work_dir)
-                if temp_path is None:
-                    return
-                source = await self._convert_phase(session, job, temp_path, work_dir)
-                if source is None:
-                    return
-                self._move_phase(session, job, source)
-            finally:
-                shutil.rmtree(work_dir, ignore_errors=True)
+            # l'isoler permet de le retrouver sans le deviner. Conservé tant que le job
+            # reste reprenable (pause, erreur), supprimé dès qu'il ne l'est plus.
+            work_dir = self.work_dir(job_id)
+            temp_path = await self._download_phase(session, job, context, work_dir)
+            if temp_path is None:
+                return
+            source = await self._convert_phase(session, job, temp_path, work_dir)
+            if source is None:
+                return
+            self._move_phase(session, job, source)
 
     async def _download_phase(
         self, session: Session, job: Job, context: JobContext, work_dir: Path
     ) -> Path | None:
-        """Télécharge le job dans `work_dir`.
+        """Télécharge le job dans `work_dir`, en reprenant un éventuel `.part` déjà présent.
 
-        Retourne le chemin du fichier produit, ou `None` en cas d'échec/annulation.
+        Retourne le chemin du fichier produit, ou `None` en cas d'échec/annulation/pause.
         """
         work_dir.mkdir(parents=True, exist_ok=True)
         job_id = job.id
         with cookie_jar_file(context.cookies, self._settings.temp_dir) as cookies_file:
             try:
-                job = self._update_job(session, job, status=JobStatus.DOWNLOADING)
                 process = await ytdlp.start_download(
                     job.url,
                     # `%(ext)s` : le conteneur réel n'est connu qu'après un éventuel
@@ -292,25 +287,53 @@ class JobQueue:
 
                 await ytdlp.stream_progress(process, on_progress)
                 await ytdlp.wait_download(process)
-                return _downloaded_file(work_dir)
+                return downloaded_file(work_dir)
             except Exception as exc:
-                if job_id in self._cancel_requested:
-                    self._update_job(session, job, status=JobStatus.CANCELED)
-                else:
-                    logger.warning("Échec téléchargement job %s : %s", job_id, exc)
-                    self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
+                self._handle_phase_failure(session, job, exc, "téléchargement")
                 return None
+
+    def _handle_phase_failure(
+        self, session: Session, job: Job, exc: Exception, phase: str
+    ) -> None:
+        """Traduit l'échec d'une phase en statut final : annulation, pause ou erreur.
+
+        Un SIGTERM/SIGKILL volontaire fait échouer la phase comme n'importe quelle panne :
+        seuls les drapeaux posés par `cancel()`/`pause()` distinguent un arrêt demandé d'une
+        vraie erreur. Le dossier de travail n'est purgé que pour une annulation — une pause
+        comme une erreur restent reprenables.
+        """
+        job_id = job.id
+        if job_id in self._cancel_requested:
+            self._update_job(session, job, status=JobStatus.CANCELED, speed=None, eta=None)
+            self.discard_work_dir(job_id)
+            return
+        if job_id in self._pause_requested:
+            self._update_job(session, job, status=JobStatus.PAUSED, speed=None, eta=None)
+            return
+        logger.warning("Échec %s job %s : %s", phase, job_id, exc)
+        self._update_job(
+            session, job, status=JobStatus.ERROR, error=str(exc), speed=None, eta=None
+        )
 
     async def _convert_phase(
         self, session: Session, job: Job, temp_path: Path, work_dir: Path
     ) -> Path | None:
-        """Conversion optionnelle. Retourne le chemin source final, ou `None` en cas d'échec."""
+        """Conversion optionnelle. Retourne le chemin source final, ou `None` en cas d'échec.
+
+        La sortie est écrite dans un **sous-dossier** : `downloaded_file` ne regarde que les
+        fichiers à la racine du dossier de travail, une conversion tronquée par un arrêt
+        brutal ne peut donc jamais être confondue avec le fichier téléchargé lors d'une
+        reprise. Ce sous-dossier est reconstruit à chaque tentative.
+        """
         preset = self._resolve_preset(job.preset_id)
         if preset is None:
             return temp_path
         job_id = job.id
         self._update_job(session, job, status=JobStatus.CONVERTING)
-        converted_path = work_dir / f"converted.{preset.container}"
+        convert_dir = work_dir / "converted"
+        shutil.rmtree(convert_dir, ignore_errors=True)
+        convert_dir.mkdir(parents=True, exist_ok=True)
+        converted_path = convert_dir / f"output.{preset.container}"
         args = ffmpeg.build_conversion_args(preset, str(temp_path), str(converted_path))
         try:
             process = await asyncio.create_subprocess_exec(
@@ -326,9 +349,9 @@ class JobQueue:
                     f"ffmpeg a échoué : {stderr.decode('utf-8', errors='replace')[-300:]}"
                 )
         except Exception as exc:
-            logger.warning("Échec conversion job %s : %s", job_id, exc)
-            self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
-            temp_path.unlink(missing_ok=True)
+            # Le fichier téléchargé est conservé : une reprise après un échec de conversion
+            # ne doit pas repasser par le réseau (yt-dlp saute un fichier déjà complet).
+            self._handle_phase_failure(session, job, exc, "conversion")
             return None
         temp_path.unlink(missing_ok=True)
         return converted_path
@@ -358,10 +381,10 @@ class JobQueue:
         if destination is None:
             return
         try:
-            final_path = _free_destination(destination)
-            _atomic_move(source, final_path)
+            final_path = free_destination(destination)
+            atomic_move(source, final_path)
         except OSError as exc:
-            self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
+            self._handle_phase_failure(session, job, exc, "déplacement")
             return
         # `filename` reflète le fichier réellement écrit : l'UI ne doit pas annoncer un nom
         # que la déduplication a changé.
@@ -373,3 +396,5 @@ class JobQueue:
             size=final_path.stat().st_size,
             filename=final_path.name,
         )
+        # Job terminé : plus rien à reprendre, le dossier de travail peut partir.
+        self.discard_work_dir(job.id)

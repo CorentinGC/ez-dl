@@ -54,6 +54,10 @@ Detailed flow for a download:
 6. If an error occurs at any step → `status: error`, message in `error`. The user
    can cancel a job in progress (`DELETE /api/jobs/{id}` → `status: canceled`) or delete it from
    the history once finished.
+7. A download can be paused (`POST /api/jobs/{id}/pause` → `status: paused`) then resumed
+   (`POST /api/jobs/{id}/resume`); a server shutdown pauses running jobs the same way. Resuming
+   restarts from the partial file kept in `EZDL_TEMP_DIR/<job_id>` — see
+   [Resume and retry](#resume-and-retry).
 
 ## Folder structure
 
@@ -65,29 +69,26 @@ server/
 ├── app/
 │   ├── main.py             # FastAPI app creation, router mounting, lifespan (startup/shutdown)
 │   ├── config.py           # pydantic-settings Settings, EZDL_ prefix
-│   ├── auth.py              # FastAPI authentication dependency (Bearer, constant-time)
+│   ├── security.py          # FastAPI authentication dependency (Bearer, constant-time)
 │   ├── models.py            # SQLModel models: Job, SiteRule
+│   ├── schemas.py           # pydantic request/response schemas for the routes
 │   ├── db.py                 # SQLite engine, session, table init
-│   ├── routers/
+│   ├── api/
 │   │   ├── health.py         # GET /api/health
 │   │   ├── capabilities.py   # GET /api/capabilities
 │   │   ├── probe.py          # GET/POST /api/probe
 │   │   ├── folders.py        # GET/POST /api/folders (secure navigation + creation)
-│   │   ├── jobs.py           # POST/GET/DELETE /api/jobs, GET /api/jobs/events (SSE)
+│   │   ├── jobs.py           # /api/jobs CRUD, pause/resume, GET /api/jobs/events (SSE)
 │   │   └── rules.py          # GET/POST/DELETE /api/rules
-│   ├── services/
-│   │   ├── ytdlp.py           # yt-dlp subprocess wrapper (probe, download, progress)
-│   │   ├── ffmpeg.py          # ffmpeg subprocess wrapper, encoder detection, presets
-│   │   ├── queue.py           # asyncio queue, concurrent workers
-│   │   ├── paths.py           # path resolution/validation against EZDL_DOWNLOAD_ROOTS
-│   │   └── cookies.py         # writing the temporary cookies file (0600), cleanup
-│   └── events.py             # event bus for SSE (job pub/sub)
-└── tests/
-    ├── test_auth.py
-    ├── test_probe.py
-    ├── test_queue.py
-    ├── test_paths.py
-    └── test_capabilities.py
+│   └── core/
+│       ├── ytdlp.py           # yt-dlp subprocess wrapper (probe, download, progress)
+│       ├── ffmpeg.py          # ffmpeg subprocess wrapper, encoder detection, presets
+│       ├── queue.py           # asyncio queue, workers, pipeline, SSE pub/sub
+│       ├── workdir.py         # a job's work directory: produced file, free name, move
+│       ├── paths.py           # path resolution/validation against EZDL_DOWNLOAD_ROOTS
+│       └── cookies.py         # writing the temporary cookies file (0600), cleanup
+└── tests/                    # pytest: auth, config, cookies, ffmpeg, paths, queue, ytdlp,
+                              # jobs and folders routes
 ```
 
 ### `extension/`
@@ -136,7 +137,10 @@ POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_
                             -> {job_id, status}
 GET    /api/jobs            -> [job]
 GET    /api/jobs/{id}       -> job
-DELETE /api/jobs/{id}       -> cancels / deletes from history
+POST   /api/jobs/{id}/pause  -> job (409 outside `queued`/`downloading`); keeps the partial file
+POST   /api/jobs/{id}/resume -> optional body {cookies?, headers?, referer?} -> `queued` job
+                                (409 outside `paused`/`error`/`canceled`, 400 if root unavailable)
+DELETE /api/jobs/{id}       -> cancels / deletes from history (+ discards the partial file)
 GET    /api/jobs/events     -> SSE, event `job` with the job serialized on every update
 GET    /api/rules           -> [site_rule]
 POST   /api/rules           -> body {domain, url_pattern, label?, notes?, source:"manual"|"learned"} -> site_rule
@@ -159,7 +163,7 @@ DELETE /api/rules/{id}      -> deletes
 | `speed` | float? | Current download speed, in bytes/s |
 | `eta` | int? | Estimated time remaining, in seconds |
 | `size` | int? | Size in bytes; total size known once the download has started, actual file size once `done` |
-| `error` | str? | Error message if `status == error` |
+| `error` | str? | Error message if `status == error`; reason for the interruption when a job was `paused` by a server restart |
 | `preset_id` | str? | Chosen ffmpeg conversion preset (`copy` by default) |
 | `format_id` | str? | Chosen yt-dlp format |
 | `created_at` / `updated_at` | datetime | Timestamps |
@@ -188,6 +192,9 @@ queued ──▶ probing ──▶ downloading ──▶ converting ──▶ mo
    └───────────┴─────────────┴──────────────┴────────────┴──▶ error
                                                           
    (queued | probing | downloading | converting | moving) ──▶ canceled
+
+   (queued | downloading) ──▶ paused        (pause, or server restart)
+   (paused | error | canceled) ──▶ queued   (resume / retry)
 ```
 
 - **`queued`**: job created, waiting for a free worker slot.
@@ -201,8 +208,26 @@ queued ──▶ probing ──▶ downloading ──▶ converting ──▶ mo
 - **`moving`**: atomic move of the temporary file (`EZDL_TEMP_DIR`) to `folder`, after
   path revalidation.
 - **`done`**: completed successfully.
-- **`error`**: failure at any step, `error` populated, temporary resources cleaned up.
+- **`error`**: failure at any step, `error` populated.
 - **`canceled`**: cancellation requested by the user (`DELETE /api/jobs/{id}`) while the job
   was still active.
+- **`paused`**: deliberately suspended (`POST /api/jobs/{id}/pause`, SIGTERM on yt-dlp) or stopped
+  by a server shutdown — in that case `error` carries the reason for the interruption without the
+  job being a failure. A paused job is always resumable.
+
+### Resume and retry
+
+`POST /api/jobs/{id}/resume` puts the job back to `queued`. The `EZDL_TEMP_DIR/<job_id>` work
+directory is **kept** as long as the job stays resumable (`paused`, `error`) and is only discarded
+on `done`, `canceled` or job deletion: the `.part` file it holds is what lets `yt-dlp --continue`
+restart from the byte it reached instead of from the beginning. An already complete file is skipped
+by yt-dlp, so a failure during conversion or the move does not trigger a second download.
+
+Two operational consequences:
+
+- resuming after a server restart only saves bandwidth if `EZDL_TEMP_DIR` **survives** the restart
+  (named volume, not tmpfs — see [setup.md](setup.md));
+- the server **never** persists a job's cookies. To resume a download on an authenticated page
+  after a restart, the client re-supplies them in the resume request body.
 
 Every state transition triggers an SSE publication on `/api/jobs/events`.

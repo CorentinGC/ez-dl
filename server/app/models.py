@@ -20,6 +20,9 @@ class JobStatus(StrEnum):
     DONE = "done"
     ERROR = "error"
     CANCELED = "canceled"
+    # Suspendu volontairement (pause) ou par un redémarrage du serveur : le fichier partiel
+    # est conservé, une reprise repart de là où le téléchargement s'est arrêté.
+    PAUSED = "paused"
 
 
 class RuleSource(StrEnum):

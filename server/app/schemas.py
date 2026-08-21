@@ -189,6 +189,19 @@ class JobCreate(BaseModel):
     title: str | None = None
 
 
+class JobResume(BaseModel):
+    """Corps (optionnel) de `POST /api/jobs/{id}/resume`.
+
+    Le serveur ne persiste jamais les cookies d'un job : après un redémarrage, le contexte
+    d'authentification a disparu avec le process. Le client le re-fournit donc ici pour
+    reprendre un téléchargement sur une page authentifiée.
+    """
+
+    cookies: list[CookieItem] | None = None
+    headers: dict[str, str] | None = None
+    referer: str | None = None
+
+
 class JobOut(BaseModel):
     """Représentation sérialisée d'un job."""
 
