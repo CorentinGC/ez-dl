@@ -118,11 +118,20 @@ async function request<T>(config: ApiClientConfig, path: string, init: RequestIn
   return (await response.json()) as T;
 }
 
+/**
+ * Découpe un tampon SSE en frames complets + reste. Les serveurs peuvent terminer les lignes
+ * en `\n` ou `\r\n` (sse-starlette émet `\r\n`) : le séparateur de frame est donc `\r?\n\r?\n`.
+ */
+export function splitSseFrames(buffer: string): { frames: string[]; rest: string } {
+  const frames = buffer.split(/\r?\n\r?\n/);
+  return { frames: frames.slice(0, -1), rest: frames[frames.length - 1] ?? '' };
+}
+
 /** Un frame SSE `event: job\ndata: {...}` -> le `Job` désérialisé, ou `null` si non pertinent. */
-function parseJobFrame(frame: string): Job | null {
+export function parseJobFrame(frame: string): Job | null {
   let eventName = 'message';
   const dataLines: string[] = [];
-  for (const line of frame.split('\n')) {
+  for (const line of frame.split(/\r?\n/)) {
     if (line.startsWith('event:')) eventName = line.slice('event:'.length).trim();
     else if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trim());
   }
@@ -162,8 +171,8 @@ function streamJobEvents(
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split('\n\n');
-        buffer = frames.pop() ?? '';
+        const { frames, rest } = splitSseFrames(buffer);
+        buffer = rest;
         for (const frame of frames) {
           const job = parseJobFrame(frame);
           if (job) onJob(job);
