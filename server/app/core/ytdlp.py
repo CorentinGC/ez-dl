@@ -251,8 +251,14 @@ async def start_download(
     args += _context_args(cookies_file, headers, referer)
     # Voir `probe` : `--` empêche qu'une URL en `-...` soit interprétée comme une option.
     args += ["--", url]
+    # `start_new_session=True` : yt-dlp standalone est un binaire PyInstaller (bootloader +
+    # process enfant). Sans groupe de process dédié, un SIGKILL sur le bootloader laisse
+    # l'enfant télécharger dans le vide. Voir `_stop_process_group` côté queue.
     return await asyncio.create_subprocess_exec(
-        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
 
 

@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type ApiClient, createApiClient, toApiConfig } from '@/src/lib/api';
+import { isActive } from '@/src/lib/jobStatus';
 import { isServerConfigured } from '@/src/lib/storage';
 import type { ExtensionSettings, Job } from '@/src/lib/types';
 import { readCookiesForUrl } from '../readCookies';
@@ -19,7 +20,7 @@ export interface UseJobsResult {
   connectionMode: JobsConnectionMode;
   /** Dernière action de la liste ayant échoué (409, 400, serveur injoignable…), à afficher. */
   actionError: string | null;
-  cancelJob: (id: string) => Promise<void>;
+  cancelJob: (job: Job) => Promise<void>;
   pauseJob: (id: string) => Promise<void>;
   resumeJob: (job: Job) => Promise<void>;
 }
@@ -82,20 +83,26 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
 
   const applyJob = useCallback((job: Job) => setJobsById((prev) => new Map(prev).set(job.id, job)), []);
 
-  const cancelJob = useCallback(async (id: string) => {
+  const cancelJob = useCallback(async (job: Job) => {
     const client = clientRef.current;
     if (!client) return;
     setActionError(null);
     try {
-      await client.deleteJob(id);
+      await client.deleteJob(job.id);
     } catch (error) {
       // Retirer la ligne alors que le serveur a refusé donnerait une liste mensongère.
       setActionError(actionMessage(error, 'Impossible de supprimer ce job.'));
       return;
     }
+    if (isActive(job)) {
+      // Annulation, pas suppression : le serveur garde le job en `canceled` (reprenable).
+      // Retirer la ligne ici la ferait réapparaître à la première mise à jour du flux —
+      // c'est ce clignotement qui donnait l'impression que « Annuler » ne faisait rien.
+      return;
+    }
     setJobsById((prev) => {
       const next = new Map(prev);
-      next.delete(id);
+      next.delete(job.id);
       return next;
     });
   }, []);

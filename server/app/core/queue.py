@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -91,7 +93,16 @@ def _progress_fields(data: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     downloaded = data.get("downloaded_bytes") or 0
     total = data.get("total_bytes") or data.get("total_bytes_estimate")
-    if total:
+    fragment_count = data.get("fragment_count")
+    if fragment_count:
+        # Téléchargement fragmenté (HLS/DASH) : `downloaded_bytes`/`total_bytes` décrivent le
+        # FRAGMENT en cours, pas le média. S'en servir ferait osciller la barre et la bloquerait
+        # à 100 % à chaque fragment fini — un job annulé à mi-course s'affichait « Annulé 100 % ».
+        # La position globale, c'est le compteur de fragments ; la taille reste inconnue ici,
+        # elle est fixée sur le fichier réellement écrit à la fin du job.
+        done_fragments = data.get("fragment_index") or 0
+        fields["progress"] = round(min(done_fragments / fragment_count, 1.0) * 100, 1)
+    elif total:
         fields["progress"] = round(min(downloaded / total, 1.0) * 100, 1)
         fields["size"] = int(total)
     speed = data.get("speed")
@@ -101,6 +112,35 @@ def _progress_fields(data: dict[str, Any]) -> dict[str, Any]:
     if eta is not None:
         fields["eta"] = int(eta)
     return fields
+
+
+def _stop_process_group(process: asyncio.subprocess.Process | None, sig: int) -> None:
+    """Envoie `sig` au **groupe** de process du job, pas au seul process lancé.
+
+    Le binaire yt-dlp standalone est un exécutable PyInstaller : un bootloader parent qui
+    ré-exécute le vrai interpréteur dans un process enfant. Le bootloader relaie SIGTERM,
+    mais un SIGKILL le tue sans que l'enfant en sache rien : celui-ci continuait à
+    télécharger et à écrire sur le pipe de progression, ce qui faisait avancer la barre
+    d'un job « annulé » jusqu'à 100 % — l'annulation paraissait sans effet (ez-dl-1xu).
+
+    Les process sont lancés avec `start_new_session=True` : leur pgid vaut leur pid. Le
+    garde-fou vérifie cette égalité avant `killpg`, sinon un process lancé autrement ferait
+    signaler le groupe du serveur lui-même.
+    """
+    if process is None or process.returncode is not None:
+        return
+    try:
+        is_group_leader = os.getpgid(process.pid) == process.pid
+    except (ProcessLookupError, PermissionError, OSError):
+        is_group_leader = False
+    try:
+        if is_group_leader:
+            os.killpg(process.pid, sig)
+        else:
+            process.send_signal(sig)
+    except (ProcessLookupError, PermissionError):
+        # Course normale : le process s'est terminé entre le test et l'envoi du signal.
+        return
 
 
 class JobQueue:
@@ -150,23 +190,19 @@ class JobQueue:
         self._queue.put_nowait(job_id)
 
     def cancel(self, job_id: str) -> None:
-        """Demande l'annulation d'un job (kill du process enfant s'il est en cours)."""
+        """Demande l'annulation d'un job (kill du groupe de process s'il est en cours)."""
         self._cancel_requested.add(job_id)
-        process = self._processes.get(job_id)
-        if process is not None and process.returncode is None:
-            process.kill()
+        _stop_process_group(self._processes.get(job_id), signal.SIGKILL)
 
     def pause(self, job_id: str) -> None:
         """Demande la suspension d'un job.
 
-        `terminate()` (SIGTERM) et non `kill()` : yt-dlp doit pouvoir laisser son `.part` et
-        son état de reprise en place, c'est ce fichier partiel qui évite de tout
-        retélécharger. Le dossier de travail n'est pas purgé pour un job suspendu.
+        SIGTERM et non SIGKILL : yt-dlp doit pouvoir laisser son `.part` et son état de
+        reprise en place, c'est ce fichier partiel qui évite de tout retélécharger. Le
+        dossier de travail n'est pas purgé pour un job suspendu.
         """
         self._pause_requested.add(job_id)
-        process = self._processes.get(job_id)
-        if process is not None and process.returncode is None:
-            process.terminate()
+        _stop_process_group(self._processes.get(job_id), signal.SIGTERM)
 
     def work_dir(self, job_id: str) -> Path:
         """Dossier de travail dédié à un job (fichier partiel, sortie de conversion)."""
@@ -368,6 +404,9 @@ class JobQueue:
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # Groupe de process dédié : `_stop_process_group` peut alors signaler tout
+                # l'arbre sans risquer de viser le groupe du serveur.
+                start_new_session=True,
             )
             self._processes[job_id] = process
             _, stderr = await process.communicate()

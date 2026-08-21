@@ -4,6 +4,8 @@ pause/reprise et récupération après un redémarrage du serveur."""
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +15,7 @@ from sqlmodel import Session
 from app.config import Settings
 from app.core import ytdlp
 from app.core.cookies import cookie_jar_dir
-from app.core.queue import INTERRUPTED_MESSAGE, JobQueue, _progress_fields
+from app.core.queue import INTERRUPTED_MESSAGE, JobQueue, _progress_fields, _stop_process_group
 from app.db import get_engine, init_db
 from app.models import Job, JobStatus
 
@@ -37,6 +39,24 @@ def test_progress_fields_returns_numeric_speed_eta_size() -> None:
     assert isinstance(fields["speed"], float)
     assert fields["eta"] == 0
     assert isinstance(fields["eta"], int)
+
+
+def test_progress_fields_counts_fragments_for_hls_downloads() -> None:
+    """Sur un téléchargement fragmenté, `downloaded_bytes`/`total_bytes` décrivent le fragment
+    en cours : s'en servir afficherait 100 % à chaque fragment fini (« Annulé 100 % »).
+    C'est le compteur de fragments qui donne la position globale, et la taille reste inconnue."""
+    fields = _progress_fields(
+        {
+            "downloaded_bytes": 712,
+            "total_bytes": 712,
+            "fragment_index": 24,
+            "fragment_count": 96,
+            "speed": 1_000_000.0,
+        }
+    )
+
+    assert fields["progress"] == 25.0
+    assert "size" not in fields
 
 
 def test_progress_fields_uses_total_bytes_estimate_when_total_unknown() -> None:
@@ -287,15 +307,20 @@ class _HangingProcess:
         self.returncode: int | None = None
         self.stdout = None
         self.stderr = None
+        # Pid inexistant : `_stop_process_group` doit alors retomber sur `send_signal` plutôt
+        # que de viser un groupe de process — surtout pas celui qui exécute les tests.
+        self.pid = -1
         self._stopped = asyncio.Event()
 
-    def terminate(self) -> None:
-        self.returncode = -15
+    def send_signal(self, sig: int) -> None:
+        self.returncode = -int(sig)
         self._stopped.set()
 
+    def terminate(self) -> None:
+        self.send_signal(signal.SIGTERM)
+
     def kill(self) -> None:
-        self.returncode = -9
-        self._stopped.set()
+        self.send_signal(signal.SIGKILL)
 
     async def wait(self) -> int:
         await self._stopped.wait()
@@ -486,3 +511,53 @@ async def test_start_purges_stale_temp_residue_but_keeps_resumable_jobs(job_queu
     assert jar_dir.is_dir()  # point de montage tmpfs : on purge son contenu, pas lui
     assert stranger.exists()
     assert stranger_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_stop_process_group_kills_the_whole_tree() -> None:
+    """Le binaire yt-dlp standalone est un PyInstaller : bootloader parent + interpréteur
+    enfant. Tuer le seul process lancé laissait l'enfant télécharger — annulation sans effet.
+    On vérifie donc qu'un petit-fils meurt bien avec son groupe."""
+    process = await asyncio.create_subprocess_exec(
+        "sh",
+        "-c",
+        "sleep 30 & echo $!; wait",
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    grandchild_pid = int((await process.stdout.readline()).strip())
+    os.kill(grandchild_pid, 0)  # vivant avant l'arrêt
+
+    try:
+        _stop_process_group(process, signal.SIGKILL)
+        # Ne pas attendre `process.wait()` : le petit-fils hérite de stdout, la boucle asyncio
+        # ne rendrait la main qu'à la fermeture du pipe — donc à sa mort naturelle, ce qui
+        # masquerait justement le bug qu'on teste.
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            try:
+                os.kill(grandchild_pid, 0)
+            except ProcessLookupError:
+                break
+        with pytest.raises(ProcessLookupError):
+            os.kill(grandchild_pid, 0)
+    finally:
+        # Filet : si le petit-fils a survécu (régression), ne pas le laisser courir 30 s.
+        for pid in (grandchild_pid, process.pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_stop_process_group_spares_the_server_group() -> None:
+    """Garde-fou : un process lancé sans session dédiée partage le groupe du serveur —
+    `killpg` y enverrait le signal à uvicorn lui-même. Seul le process visé doit tomber."""
+    process = await asyncio.create_subprocess_exec("sh", "-c", "sleep 30")
+
+    _stop_process_group(process, signal.SIGKILL)
+    await process.wait()
+
+    assert process.returncode is not None
+    os.kill(os.getpid(), 0)  # le serveur est toujours là

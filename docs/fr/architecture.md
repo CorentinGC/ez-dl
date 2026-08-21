@@ -237,4 +237,21 @@ Côté extension, la vue Jobs du popup expose ces transitions : **Pause** sur un
 Si l'option « envoyer les cookies » est active, la reprise relit les cookies du navigateur pour
 `job.url` et les joint à la requête — sans cette relecture, yt-dlp repartirait anonyme.
 
+### Annulation et suppression
+
+`DELETE /api/jobs/{id}` porte **deux** actions selon l'état du job :
+
+- job encore actif (`queued`, `probing`, `downloading`, `converting`, `moving`) → le
+  téléchargement est **arrêté** et le job passe en `canceled`, en restant dans l'historique
+  (il peut être réessayé). Le signal est envoyé au **groupe de process**, pas au seul process
+  lancé : le binaire yt-dlp standalone est un exécutable PyInstaller (bootloader + enfant), et
+  tuer le bootloader seul laissait l'enfant télécharger jusqu'au bout ;
+- job terminé (`done`, `error`, `canceled`, `paused`) → il est **retiré** de l'historique et son
+  dossier de travail purgé.
+
+Le popup reflète exactement cette bascule : un même bouton affiche « Annuler » tant que le job est
+actif, « Supprimer » ensuite (`src/lib/jobStatus.ts`, miroir des ensembles de statuts du serveur).
+Il ne retire donc pas la ligne de la liste lors d'une annulation — c'est la mise à jour SSE qui la
+repasse en « Annulé ».
+
 Toute transition d'état déclenche une publication SSE sur `/api/jobs/events`.

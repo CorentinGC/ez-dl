@@ -1,10 +1,11 @@
 /**
  * Vue "Jobs" de la popup : liste des jobs de téléchargement avec barre de progression,
- * vitesse, ETA et actions (pause, reprise/retry, annulation). `aria-live` sur la liste
- * pour annoncer les mises à jour.
+ * vitesse, ETA et actions (pause, reprise/retry, annulation, suppression). `aria-live` sur
+ * la liste pour annoncer les mises à jour.
  */
 
 import { formatEta, formatProgress, formatSize, formatSpeed } from '@/src/lib/format';
+import { isActive, isPausable, isResumable } from '@/src/lib/jobStatus';
 import type { Job, JobStatus } from '@/src/lib/types';
 import type { JobsConnectionMode } from '../hooks/useJobs';
 
@@ -12,7 +13,7 @@ interface JobsViewProps {
   jobs: Job[];
   connectionMode: JobsConnectionMode;
   actionError: string | null;
-  onCancel: (id: string) => void;
+  onCancel: (job: Job) => void;
   onPause: (id: string) => void;
   onResume: (job: Job) => void;
 }
@@ -28,15 +29,6 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   paused: 'Suspendu',
   canceled: 'Annulé',
 };
-
-// Un job suspendu reste supprimable : le DELETE purge son dossier de travail côté serveur.
-const CANCELLABLE_STATUSES: JobStatus[] = ['queued', 'probing', 'downloading', 'converting', 'moving', 'paused'];
-
-// Mêmes statuts que `_PAUSABLE_STATUSES` côté serveur : ailleurs, la route répond 409.
-const PAUSABLE_STATUSES: JobStatus[] = ['queued', 'downloading'];
-
-// Idem `_RESUMABLE_STATUSES` : un job arrêté repart de son fichier partiel s'il en reste un.
-const RESUMABLE_STATUSES: JobStatus[] = ['paused', 'error', 'canceled'];
 
 export function JobsView({ jobs, connectionMode, actionError, onCancel, onPause, onResume }: JobsViewProps) {
   if (jobs.length === 0) {
@@ -60,7 +52,7 @@ export function JobsView({ jobs, connectionMode, actionError, onCancel, onPause,
           <li key={job.id}>
             <JobRow
               job={job}
-              onCancel={() => onCancel(job.id)}
+              onCancel={() => onCancel(job)}
               onPause={() => onPause(job.id)}
               onResume={() => onResume(job)}
             />
@@ -84,9 +76,12 @@ function JobRow({
 }) {
   // job.progress est déjà un pourcentage 0.0–100.0 (contrat serveur), pas une fraction 0–1.
   const progressPct = job.progress !== null ? Math.round(Math.min(Math.max(job.progress, 0), 100)) : null;
-  const cancellable = CANCELLABLE_STATUSES.includes(job.status);
-  const pausable = PAUSABLE_STATUSES.includes(job.status);
-  const resumable = RESUMABLE_STATUSES.includes(job.status);
+  // Même route `DELETE`, deux actions distinctes : sur un job en cours elle **annule** le
+  // téléchargement (la ligne reste, en « Annulé ») ; sur un job terminé elle le **retire**
+  // de l'historique. Tout job a donc toujours une sortie, y compris `done` et `error`.
+  const active = isActive(job);
+  const pausable = isPausable(job);
+  const resumable = isResumable(job);
   const label = job.title || job.filename;
 
   return (
@@ -128,25 +123,21 @@ function JobRow({
         </p>
       ) : null}
 
-      {pausable || resumable || cancellable ? (
-        <div className="job-row-actions">
-          {pausable ? (
-            <button type="button" className="btn btn-ghost btn-small" onClick={onPause}>
-              Pause
-            </button>
-          ) : null}
-          {resumable ? (
-            <button type="button" className="btn btn-ghost btn-small" onClick={onResume}>
-              {job.status === 'paused' ? 'Reprendre' : 'Réessayer'}
-            </button>
-          ) : null}
-          {cancellable ? (
-            <button type="button" className="btn btn-ghost btn-small" onClick={onCancel}>
-              {job.status === 'paused' ? 'Supprimer' : 'Annuler'}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="job-row-actions">
+        {pausable ? (
+          <button type="button" className="btn btn-ghost btn-small" onClick={onPause}>
+            Pause
+          </button>
+        ) : null}
+        {resumable ? (
+          <button type="button" className="btn btn-ghost btn-small" onClick={onResume}>
+            {job.status === 'paused' ? 'Reprendre' : 'Réessayer'}
+          </button>
+        ) : null}
+        <button type="button" className="btn btn-ghost btn-small" onClick={onCancel}>
+          {active ? 'Annuler' : 'Supprimer'}
+        </button>
+      </div>
     </article>
   );
 }

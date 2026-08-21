@@ -62,6 +62,12 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       Vérifié en réel : probe 200 (`best_format_id` 270 au lieu du Premium 616), job 1080p avec
       piste audio opus, non-régression source sniffée x.com. 2026-08-21.
 
+- [x] `ez-dl-1xu` / `ez-dl-m4q` : « Annuler » réparé — kill du groupe de process (l'enfant
+      PyInstaller de yt-dlp survivait au kill), progression fragmentée corrigée, popup qui
+      distingue Annuler (job actif) de Supprimer (job terminé, `done`/`error` compris, qui
+      n'avaient aucun bouton). Pause/reprise/retry vérifiés en réel puis extension rebuildée.
+      100 tests pytest + 124 Vitest. 2026-08-21.
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.
@@ -181,6 +187,19 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   (suffixes de langue `-0/-1`, formats `Premium` selon le client interrogé). `build_format_selector`
   produit `<id>+bestaudio/<id>/bv*+ba/b` : fusion audio, repli si déjà muxé, repli global si l'id a
   disparu depuis le probe. Storyboards (`mhtml`) et formats « Premium » sont filtrés du probe.
+- **Tuer un job = tuer le GROUPE de process** : le binaire yt-dlp standalone est un exécutable
+  PyInstaller (bootloader parent + interpréteur enfant). Le bootloader relaie SIGTERM mais pas
+  SIGKILL : `process.kill()` ne tuait que lui, l'enfant continuait à télécharger et à écrire sur
+  le pipe de progression — la barre d'un job « annulé » montait jusqu'à 100 % (`ez-dl-1xu`).
+  Correctif : `start_new_session=True` au lancement (yt-dlp ET ffmpeg) + `os.killpg`, avec un
+  garde-fou `pgid == pid` pour ne jamais signaler le groupe du serveur.
+- **Progression yt-dlp sur un flux fragmenté (HLS/DASH)** : `downloaded_bytes`/`total_bytes`
+  décrivent le **fragment** en cours, pas le média. Utiliser `fragment_index`/`fragment_count`,
+  sinon la barre oscille et atteint 100 % à chaque fragment fini.
+- **`DELETE /api/jobs/{id}` a deux sens** : annulation (job actif, la ligne reste en `canceled`,
+  reprenable) ou suppression d'historique (job terminé). Le popup doit refléter les deux — retirer
+  la ligne de façon optimiste après une annulation la fait réapparaître par SSE, ce qui donnait
+  l'impression que « Annuler » ne faisait rien.
 - **Assets vidéo externes piégeux pour les e2e** : `commondatastorage.googleapis.com` refuse les
   UA non-navigateur (403 pour yt-dlp/curl), `media.w3.org` 403 par intermittence quand yt-dlp
   envoie un `Referer` étranger. Servir la vidéo de test en local (`python3 -m http.server`).

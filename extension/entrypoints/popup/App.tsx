@@ -71,7 +71,7 @@ export default function App() {
             jobs={jobs}
             connectionMode={connectionMode}
             actionError={actionError}
-            onCancel={(id) => void cancelJob(id)}
+            onCancel={(job) => void cancelJob(job)}
             onPause={(id) => void pauseJob(id)}
             onResume={(job) => void resumeJob(job)}
           />
