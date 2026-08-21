@@ -1,0 +1,73 @@
+# Stack Docker de ez-dl (serveur uniquement — l'extension Chrome n'est pas conteneurisée).
+#
+# Démarrage :
+#   1. Copier ce fichier tel quel, créer un `.env` à côté avec au minimum EZDL_PASSWORD=<mot de passe fort>
+#   2. Adapter les volumes médias ci-dessous (chemins réels de votre NAS/disque)
+#   3. `docker compose up -d`
+#
+# GPU NVIDIA (encodage matériel) : voir docker-compose.gpu.yml.
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      args:
+        # UID/GID de l'utilisateur du conteneur — alignez-les sur le propriétaire de vos
+        # volumes médias (ex: `id -u`/`id -g` de l'utilisateur qui possède le NAS monté).
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+    container_name: ez-dl
+    restart: unless-stopped
+
+    # Fichier .env optionnel (non versionné) pour surcharger les variables ci-dessous
+    # sans les écrire en clair dans ce fichier. `required: false` : docker compose ne
+    # bloque pas si le fichier n'existe pas encore.
+    env_file:
+      - path: .env
+        required: false
+
+    environment:
+      # Obligatoire : le serveur refuse de démarrer sans mot de passe. La syntaxe `:?`
+      # fait échouer `docker compose up` explicitement si la variable est absente/vide,
+      # plutôt que de démarrer silencieusement sans authentification.
+      EZDL_PASSWORD: "${EZDL_PASSWORD:?EZDL_PASSWORD est requis, definissez-le dans un fichier .env ou dans l'environnement}"
+      EZDL_HOST: ${EZDL_HOST:-0.0.0.0}
+      EZDL_PORT: ${EZDL_PORT:-8000}
+      # Racines de téléchargement autorisées, format `Label=/chemin` séparé par des virgules.
+      # Exemple cohérent avec les volumes médias montés ci-dessous — à adapter.
+      EZDL_DOWNLOAD_ROOTS: ${EZDL_DOWNLOAD_ROOTS:-Movies=/data/movies,Series=/data/series}
+      EZDL_DATA_DIR: ${EZDL_DATA_DIR:-/config}
+      EZDL_TEMP_DIR: ${EZDL_TEMP_DIR:-/tmp/ez-dl}
+      EZDL_MAX_CONCURRENT_JOBS: ${EZDL_MAX_CONCURRENT_JOBS:-2}
+      EZDL_YTDLP_UPDATE_INTERVAL_HOURS: ${EZDL_YTDLP_UPDATE_INTERVAL_HOURS:-24}
+      EZDL_YTDLP_BINARY: ${EZDL_YTDLP_BINARY:-yt-dlp}
+      EZDL_FFMPEG_BINARY: ${EZDL_FFMPEG_BINARY:-ffmpeg}
+      EZDL_CORS_ORIGINS: ${EZDL_CORS_ORIGINS:-chrome-extension://*}
+      EZDL_LOG_LEVEL: ${EZDL_LOG_LEVEL:-info}
+
+    ports:
+      - "${EZDL_PORT:-8000}:8000"
+
+    volumes:
+      # Base SQLite + état applicatif (EZDL_DATA_DIR) — persisté à côté de ce fichier.
+      - ./data:/config
+
+      # --- Exemples de montages médias à ADAPTER (chemins réels de votre NAS/disque) ---
+      # Doivent correspondre aux racines déclarées dans EZDL_DOWNLOAD_ROOTS ci-dessus.
+      # - /mnt/media/movies:/data/movies:rw
+      # - /mnt/media/series:/data/series:rw
+
+    # Fichiers partiels avant déplacement final (EZDL_TEMP_DIR). tmpfs = pas de persistance
+    # ni d'écriture disque pour les téléchargements en cours. Si vos téléchargements sont
+    # volumineux et que la RAM est limitée, remplacez par un volume nommé classique :
+    #   volumes: [ "ezdl-temp:/tmp/ez-dl" ]  (+ déclarer le volume `ezdl-temp` en bas de fichier)
+    tmpfs:
+      - /tmp/ez-dl
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3

@@ -2,3 +2,37 @@
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Note: .beads/ is intentionally NOT ignored — issue tracking data is committed.
+
+# ── Python (server/) ─────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# ── Node (extension/) ────────────────────────────────────────────────────────
+node_modules/
+.output/
+.wxt/
+dist/
+
+# ── Environment ──────────────────────────────────────────────────────────────
+.env
+.env.local
+
+# ── MCP runtime ──────────────────────────────────────────────────────────────
+.mcp/chrome-devtools/
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+data/
+downloads/
+*.sqlite3
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/

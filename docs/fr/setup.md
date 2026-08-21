@@ -1,0 +1,104 @@
+# Setup
+
+## Prérequis
+
+| Outil | Version | Rôle |
+|---|---|---|
+| Python | ≥ 3.13 | Serveur |
+| [uv](https://docs.astral.sh/uv/) | dernière stable | Gestionnaire de paquets/venv Python |
+| Node.js | ≥ 20 (LTS) | Build de l'extension |
+| npm | livré avec Node.js | Gestionnaire de paquets extension |
+| Docker + Docker Compose | dernière stable | Déploiement du serveur |
+| `yt-dlp` | binaire **standalone** (pas la version pip) | Téléchargement vidéo — voir [MEMORY.md](../../MEMORY.md) pour la raison |
+| `ffmpeg` / `ffprobe` | dernière stable | Conversion et probe des flux |
+| Google Chrome ou Chromium | dernière stable | Chargement de l'extension MV3 |
+
+## Installation dev locale
+
+### Serveur
+
+```bash
+cd server
+uv sync                 # installe les dépendances (dont le groupe dev : pytest, ruff, httpx)
+cp ../.env.example .env # renseigner EZDL_PASSWORD au minimum
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+### Extension
+
+```bash
+cd extension
+npm install
+npm run dev              # ouvre Chrome avec l'extension chargée en mode watch (WXT)
+```
+
+## Variables d'environnement
+
+Toutes préfixées `EZDL_`. À définir dans `server/.env` (jamais commité — voir `.env.example` à la
+racine pour le gabarit avec valeurs génériques).
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `EZDL_PASSWORD` | *(requis, pas de défaut)* | Mot de passe d'accès à l'API. Le serveur refuse de démarrer s'il est absent ou vide. |
+| `EZDL_HOST` | `0.0.0.0` | Bind uvicorn |
+| `EZDL_PORT` | `8000` | Port HTTP |
+| `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Racines autorisées, format `Label=/chemin` séparées par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. |
+| `EZDL_DATA_DIR` | `/config` | SQLite + état persistant |
+| `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Fichiers partiels avant déplacement final |
+| `EZDL_MAX_CONCURRENT_JOBS` | `2` | Nombre de workers de la queue |
+| `EZDL_YTDLP_UPDATE_INTERVAL_HOURS` | `24` | Période de l'auto-update yt-dlp (`0` = désactivé) |
+| `EZDL_YTDLP_BINARY` | `yt-dlp` | Chemin du binaire yt-dlp |
+| `EZDL_FFMPEG_BINARY` | `ffmpeg` | Chemin du binaire ffmpeg |
+| `EZDL_CORS_ORIGINS` | `chrome-extension://*` | Origines autorisées |
+| `EZDL_LOG_LEVEL` | `info` | Niveau de log |
+
+Exemple générique de `EZDL_DOWNLOAD_ROOTS` pour un NAS : `Films=/mnt/media/movies,Séries=/mnt/media/tv`.
+
+## Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+Points d'attention dans `docker-compose.yml` (voir [modules GPU](decisions/0001-stack-fastapi-wxt.md)
+pour le contexte) :
+
+- Monter les racines de `EZDL_DOWNLOAD_ROOTS` en volumes, avec les **mêmes chemins côté conteneur
+  que dans la variable d'environnement**.
+- Monter un volume persistant sur `EZDL_DATA_DIR` (SQLite + état).
+- Bloc GPU optionnel (NVIDIA/QuickSync/VAAPI) uniquement si des presets matériels sont utilisés —
+  voir [modules/conversion.md](modules/conversion.md).
+- Charger `EZDL_PASSWORD` et les autres variables via un fichier `.env` (jamais commité) ou les
+  secrets Docker, jamais en dur dans `docker-compose.yml`.
+
+## Chargement de l'extension dans Chrome
+
+1. `cd extension && npm run build` (ou laisser `npm run dev` actif).
+2. Ouvrir `chrome://extensions`.
+3. Activer le **Mode développeur** (coin supérieur droit).
+4. **Charger l'extension non empaquetée** → sélectionner `extension/.output/chrome-mv3` (build) ou
+   le dossier généré par `npm run dev`.
+5. Ouvrir la page d'options de l'extension pour configurer l'URL du serveur et le mot de passe
+   (étape suivante).
+
+## Configuration serveur + mot de passe
+
+1. Définir `EZDL_PASSWORD` côté serveur (fichier `.env` ou variable d'environnement du conteneur) —
+   voir [ADR 0003](decisions/0003-auth-mot-de-passe.md).
+2. Démarrer le serveur ; il refuse de démarrer si `EZDL_PASSWORD` est vide ou absent.
+3. Dans la page d'options de l'extension : renseigner l'URL du serveur (ex.
+   `http://nas.local:8000`) et le même mot de passe, puis utiliser le bouton **Tester la
+   connexion**.
+4. Le mot de passe est stocké côté extension dans `chrome.storage.local` et envoyé en
+   `Authorization: Bearer <mot de passe>` à chaque requête.
+
+## Vérification
+
+```bash
+curl http://localhost:8000/api/health
+# {"status":"ok","version":"0.1.0","ytdlp_version":"2026.xx.xx","ffmpeg_available":true}
+```
+
+Un `status: "ok"` avec `ffmpeg_available: true` confirme que le serveur, yt-dlp et ffmpeg sont
+correctement installés et accessibles. Cette route est publique (pas d'en-tête `Authorization`
+requis), pratique pour un healthcheck Docker.

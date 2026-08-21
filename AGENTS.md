@@ -1,4 +1,47 @@
-# Agent Instructions
+# Agent Instructions — ez-dl
+
+Projet **ez-dl** : téléchargeur vidéo self-hosted. Extension Chrome (MV3) détecte les vidéos d'une
+page, serveur FastAPI dans Docker télécharge via yt-dlp, convertit optionnellement via ffmpeg,
+range dans des dossiers montés. Repo public source-available, licence PolyForm Noncommercial 1.0.0.
+
+## Avant de coder
+
+- **Lire la doc officielle à jour, pas la mémoire d'entraînement** : les données d'entraînement
+  peuvent être périmées (versions, APIs dépréciées). Utiliser le MCP `context7`
+  (`resolve-library-id` puis `query-docs`) ou, à défaut, les sources locales (`node_modules/*/README`,
+  `.venv/lib/python*/site-packages/*/dist-info`) avant d'écrire du code utilisant une librairie.
+- **Installateurs officiels et dernière version stable** : avant d'ajouter une dépendance, vérifier
+  la version courante (`npm view <pkg> version`, `uv add <pkg>` sans épingler sauf raison précise) —
+  ne pas recopier une version connue depuis la mémoire d'entraînement.
+- Lire `CLAUDE.md`, `MEMORY.md` et `llms.txt` à la racine du repo : ils contiennent le contrat de
+  stack, l'état courant du projet et l'index de documentation.
+
+## Conventions non négociables du projet
+
+- **Auth sur toutes les routes** sauf `GET /api/health` : header `Authorization: Bearer <EZDL_PASSWORD>`,
+  comparaison constant-time côté serveur.
+- **`subprocess` en liste d'arguments uniquement**, jamais `shell=True` (yt-dlp, ffmpeg).
+- **Validation systématique des chemins de destination** : résolus (`Path.resolve()`) et vérifiés
+  comme descendants d'une racine `EZDL_DOWNLOAD_ROOTS`.
+- **Aucun code de contournement de DRM** (Widevine/PlayReady/FairPlay), ni suggestion allant dans ce
+  sens — même si demandé.
+- **Aucune information personnelle** dans un fichier commité : pas d'email réel, nom réel, chemin
+  NAS réel, IP privée réelle, secret en dur. Exemples génériques uniquement.
+- Commentaires de code en **FR**, identifiants et API en **EN**.
+- Fichiers < 400 LOC (warning), découpage obligatoire au-delà de 500 LOC.
+
+## Workflow
+
+- Lire `MEMORY.md` avant de commencer, le mettre à jour après chaque edit significatif.
+- Paralléliser le travail décomposable : plusieurs subagents en une seule réponse plutôt que
+  séquentiel, sauf dépendance réelle entre les tâches.
+- **Jamais de `git commit` ou `git push` sans validation explicite de l'utilisateur.**
+- Respecter le lint (`ruff check --fix` côté serveur, `tsc --noEmit` côté extension) et les tests
+  (`pytest`, `npm run test`) avant de considérer une tâche terminée.
+- `docs/fr/` est canonique, `docs/en/` est un miroir : toute modification de `docs/fr/` doit être
+  répercutée dans `docs/en/` dans le même commit.
+
+## Beads
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 

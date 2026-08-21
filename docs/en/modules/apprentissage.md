@@ -1,0 +1,79 @@
+# Module — Learning
+
+Learning mode ("assisted detection") kicks in when neither the yt-dlp probe nor automatic network
+sniffing has found a video on the active page (see [modules/detection.md](detection.md)). It
+turns a one-off manual intervention into a reusable rule for subsequent visits to the same
+domain.
+
+Tracked by beads epic `ez-dl-ek5`.
+
+## Trigger
+
+In the popup, if the `/api/probe` + sniffing merge returns no result, a **"Help detect"** button
+appears. Clicking it triggers the DOM picker in the active tab.
+
+## 1. DOM picker (`content.ts`)
+
+The content script (`extension/entrypoints/content.ts`) activates an interactive selection mode
+on the page:
+
+- **Hover**: the element under the cursor is highlighted (an injected visual outline, without
+  persistently modifying the page's DOM).
+- **Click**: selects the element — typically a `<video>` tag, or a container enclosing the player
+  (iframe, player div) if no native `<video>` tag is found directly.
+- The selected element (tag, relevant attributes such as `src`/`currentSrc`, position in the DOM)
+  is sent back to `background.ts` via a runtime message.
+
+## 2. Network correlation (`background.ts` + `lib/correlation.ts`)
+
+The background script keeps a sliding buffer of the tab's recent network requests (coming from
+the same sniffer as automatic detection, see
+[modules/detection.md](detection.md#2-network-sniffing-extension)), stored in
+`chrome.storage.session` to survive a possible service worker wake-up.
+
+`extension/lib/correlation.ts` cross-references the selected DOM element with this buffer:
+
+- direct match if the element exposes a `src`/`currentSrc` that matches a recent request;
+- failing that, a temporal heuristic: video/stream requests (same patterns as the automatic
+  sniffer) occurring within a time window close to the loading of / interaction with the selected
+  element;
+- if several candidates remain, the most likely URL(s) are presented to the user for confirmation
+  rather than silently chosen.
+
+## 3. Proposal and confirmation
+
+The popup displays the candidate URL resulting from the correlation. The user can:
+
+- accept it as-is and start a job normally (like an automatically detected video);
+- if the URL format is reusable for other videos on the same site (a generic pattern identified,
+  e.g. a `/hls/{id}/index.m3u8` path), save a **site rule**.
+
+## 4. Saving the rule (`POST /api/rules`)
+
+```json
+{"domain": "example.com", "url_pattern": "*/hls/*.m3u8", "label": "Main player", "notes": "Detected via DOM picker on 2026-08-21", "source": "learned"}
+```
+
+`url_pattern` is a **simple glob/regex** (see
+[architecture.md](../architecture.md#data-model)) applied by the sniffer to future network
+requests detected on `domain`. `source: "learned"` distinguishes these rules from manually added
+rules (`source: "manual"`, e.g. via a future advanced options page) in `GET /api/rules`.
+
+## 5. Reuse
+
+On subsequent visits to the same domain, `background.ts` loads the relevant `SiteRule` entries
+(`GET /api/rules`, filtered by `domain`, cached on the extension side) and applies them with
+priority in the sniffer: any network request whose URL matches a known `url_pattern` is
+immediately proposed in the popup, without going through the DOM picker again. The user can
+delete a rule that has become obsolete (`DELETE /api/rules/{id}`) if the site's structure changes
+and the rule produces false positives/negatives.
+
+## Implementation caveats
+
+- The DOM picker must be **non-intrusive**: do not persistently modify the page's final DOM
+  (clean up highlight styles when the mode is deactivated).
+- Correlation must handle the absence of a clear result without crashing: offer "no candidate
+  found" rather than an incorrect URL.
+- Every saved rule goes through `POST /api/rules`'s standard pydantic validation on the server
+  side (see [conventions.md](../conventions.md#security)) — no bypassing input validation just
+  because the data comes from a "trusted" correlation.

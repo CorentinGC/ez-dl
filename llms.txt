@@ -1,0 +1,41 @@
+# ez-dl
+
+> Téléchargeur vidéo self-hosted : extension Chrome (MV3) qui détecte les vidéos d'une page,
+> serveur FastAPI/yt-dlp/ffmpeg dans Docker qui télécharge, convertit et range les fichiers.
+
+## Documentation (FR — canonique)
+
+- [Architecture](docs/fr/architecture.md) : vue d'ensemble, flux de données, structure des
+  dossiers, contrat d'API, modèle de données, cycle de vie d'un job.
+- [Setup](docs/fr/setup.md) : prérequis, install dev, variables d'environnement, docker compose,
+  chargement de l'extension, vérification.
+- [Conventions](docs/fr/conventions.md) : style de code, nommage, taille de fichiers, tests,
+  commits, doc bilingue, sécurité.
+- [ADR 0001 — Stack FastAPI + WXT](docs/fr/decisions/0001-stack-fastapi-wxt.md)
+- [ADR 0002 — Licence PolyForm Noncommercial](docs/fr/decisions/0002-licence-polyform-noncommercial.md)
+- [ADR 0003 — Auth par mot de passe](docs/fr/decisions/0003-auth-mot-de-passe.md)
+- [Module — Détection](docs/fr/modules/detection.md) : yt-dlp probe, sniffing réseau, règles apprises.
+- [Module — Conversion](docs/fr/modules/conversion.md) : presets ffmpeg, détection des encodeurs.
+- [Module — Apprentissage](docs/fr/modules/apprentissage.md) : picker DOM, corrélation réseau,
+  règles de site.
+
+## Documentation (EN — mirror)
+
+- [Architecture](docs/en/architecture.md)
+- [Setup](docs/en/setup.md)
+- [Conventions](docs/en/conventions.md)
+- [ADR 0001 — FastAPI + WXT stack](docs/en/decisions/0001-stack-fastapi-wxt.md)
+- [ADR 0002 — PolyForm Noncommercial license](docs/en/decisions/0002-licence-polyform-noncommercial.md)
+- [ADR 0003 — Password auth](docs/en/decisions/0003-auth-mot-de-passe.md)
+- [Module — Detection](docs/en/modules/detection.md)
+- [Module — Conversion](docs/en/modules/conversion.md)
+- [Module — Learning mode](docs/en/modules/apprentissage.md)
+
+## Agent
+
+- [CLAUDE.md](CLAUDE.md) : guide agent (stack, commandes, qualité, sécurité, équipe d'agents).
+- [MEMORY.md](MEMORY.md) : mémoire de travail courte (état courant, décisions, pièges).
+
+## Optional
+
+- [README.md](README.md) : présentation du projet, installation rapide, licence.

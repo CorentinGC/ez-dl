@@ -1,0 +1,36 @@
+# Override GPU NVIDIA pour ez-dl — active l'encodage matériel (h264_nvenc/hevc_nvenc).
+#
+# Usage :
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Prérequis sur l'hôte :
+#   - Pilote NVIDIA installé + nvidia-container-toolkit configuré pour Docker
+#     (voir https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+#   - `docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi` doit fonctionner
+#
+# IMPORTANT : le ffmpeg installé dans server/Dockerfile est le paquet Debian (apt) par défaut,
+# qui n'embarque PAS le support NVENC (dépendances non-libres). Avec ce seul override, aucun
+# preset `*_nvenc` n'apparaîtra dans /api/capabilities (ffmpeg -encoders ne les listera pas).
+# Pour un encodage matériel réel, remplacez l'étape d'installation ffmpeg du Dockerfile par une
+# image/paquet ffmpeg compilé avec NVENC (ex: jrottenberg/ffmpeg:*-nvidia comme référence de build,
+# ou une compilation maison --enable-nvenc --enable-cuda) puis reconstruisez l'image serveur.
+
+services:
+  server:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+
+    # Méthode recommandée (Docker Compose v2 + nvidia-container-toolkit en mode CDI/legacy) :
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Alternative pour un moteur Docker plus ancien ne supportant pas `deploy.resources`
+    # avec `docker compose up` (ex: Compose v1, ou runtime nvidia enregistré globalement) :
+    # décommentez la ligne suivante et supprimez le bloc `deploy:` ci-dessus.
+    # runtime: nvidia

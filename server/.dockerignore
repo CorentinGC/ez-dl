@@ -1,0 +1,16 @@
+# Environnement virtuel et caches Python — reconstruits dans l'image par uv
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+
+# Tests : pas nécessaires dans l'image de production
+tests
+
+# Données locales / base SQLite de dev — jamais dans l'image
+data
+*.db
+
+# Secrets — ne doit jamais être copié dans un layer d'image
+.env

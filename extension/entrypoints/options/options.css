@@ -1,0 +1,350 @@
+/* Page d'options ez-dl — mêmes tokens que la popup, mise en page pleine page. */
+
+:root {
+  --ez-bg: #ffffff;
+  --ez-bg-elevated: #f3f4f6;
+  --ez-bg-hover: #e5e7eb;
+  --ez-text: #111827;
+  --ez-text-muted: #6b7280;
+  --ez-border: #d1d5db;
+  --ez-accent: #2563eb;
+  --ez-accent-contrast: #ffffff;
+  --ez-accent-hover: #1d4ed8;
+  --ez-danger: #dc2626;
+  --ez-danger-bg: #fee2e2;
+  --ez-success: #16a34a;
+  --ez-success-bg: #dcfce7;
+  --ez-warning-bg: #fef3c7;
+  --ez-warning-text: #92400e;
+  --ez-radius: 8px;
+  --ez-focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ez-bg: #17181c;
+    --ez-bg-elevated: #202127;
+    --ez-bg-hover: #2a2c33;
+    --ez-text: #f3f4f6;
+    --ez-text-muted: #9ca3af;
+    --ez-border: #383a42;
+    --ez-accent: #3b82f6;
+    --ez-accent-contrast: #0b1220;
+    --ez-accent-hover: #60a5fa;
+    --ez-danger: #f87171;
+    --ez-danger-bg: #3f1d1d;
+    --ez-success: #4ade80;
+    --ez-success-bg: #123a20;
+    --ez-warning-bg: #3f2d0f;
+    --ez-warning-text: #fbbf24;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  color-scheme: light dark;
+}
+
+body {
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--ez-bg-elevated);
+  color: var(--ez-text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ez-focus-ring);
+  border-radius: var(--ez-radius);
+}
+
+.options-root {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 20px;
+}
+
+h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+
+.options-section {
+  background: var(--ez-bg);
+  border: 1px solid var(--ez-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.options-section-description {
+  color: var(--ez-text-muted);
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.options-hint {
+  color: var(--ez-text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.options-warning {
+  background: var(--ez-warning-bg);
+  color: var(--ez-warning-text);
+  border-radius: var(--ez-radius);
+  padding: 10px 12px;
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Champs (identiques à la popup) */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 420px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ez-text-muted);
+}
+
+.field-select,
+.field-input {
+  border: 1px solid var(--ez-border);
+  border-radius: var(--ez-radius);
+  padding: 7px 9px;
+  background: var(--ez-bg);
+  color: var(--ez-text);
+  width: 100%;
+}
+
+.field-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.field-error {
+  color: var(--ez-danger);
+  background: var(--ez-danger-bg);
+  border-radius: var(--ez-radius);
+  padding: 6px 8px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.field-success {
+  color: var(--ez-success);
+  background: var(--ez-success-bg);
+  border-radius: var(--ez-radius);
+  padding: 6px 8px;
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Boutons (identiques à la popup) */
+.btn {
+  border-radius: var(--ez-radius);
+  border: 1px solid var(--ez-border);
+  background: var(--ez-bg);
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 500;
+  align-self: flex-start;
+}
+
+.btn:hover {
+  background: var(--ez-bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--ez-accent);
+  border-color: var(--ez-accent);
+  color: var(--ez-accent-contrast);
+}
+
+.btn-primary:hover {
+  background: var(--ez-accent-hover);
+  border-color: var(--ez-accent-hover);
+}
+
+.btn-secondary {
+  background: var(--ez-bg-elevated);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ez-text-muted);
+}
+
+.btn-ghost:hover {
+  background: var(--ez-bg-hover);
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Favoris */
+.folder-favorites-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.folder-favorite-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--ez-border);
+  border-radius: var(--ez-radius);
+  background: var(--ez-bg-elevated);
+}
+
+.folder-favorite-label {
+  font-weight: 600;
+}
+
+.folder-favorite-path {
+  flex: 1;
+  color: var(--ez-text-muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.folder-favorite-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Navigateur de dossiers (identique à la popup) */
+.folder-browser {
+  margin-top: 6px;
+  border: 1px solid var(--ez-border);
+  border-radius: var(--ez-radius);
+  padding: 10px;
+  background: var(--ez-bg-elevated);
+  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.folder-browser-status {
+  margin: 0;
+  color: var(--ez-text-muted);
+}
+
+.folder-browser-current {
+  margin: 0;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.folder-browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  max-height: 140px;
+}
+
+.folder-browser-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.folder-browser-item:hover {
+  background: var(--ez-bg-hover);
+}
+
+.folder-browser-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Règles apprises */
+.rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--ez-border);
+  border-radius: var(--ez-radius);
+  background: var(--ez-bg-elevated);
+}
+
+.rule-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-row-domain {
+  margin: 0;
+  font-weight: 600;
+}
+
+.rule-row-source {
+  font-weight: 400;
+  color: var(--ez-text-muted);
+  font-size: 12px;
+}
+
+.rule-row-pattern,
+.rule-row-label {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ez-text-muted);
+  word-break: break-all;
+}

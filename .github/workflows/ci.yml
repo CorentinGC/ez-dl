@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  server:
+    name: Serveur (lint + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: "server/uv.lock"
+
+      - name: Installer les dépendances (uv sync)
+        working-directory: server
+        run: uv sync
+
+      - name: Lint (ruff check)
+        working-directory: server
+        run: uv run ruff check .
+
+      - name: Vérifier le formatage (ruff format)
+        working-directory: server
+        run: uv run ruff format --check .
+
+      - name: Tests (pytest)
+        working-directory: server
+        run: uv run pytest -q
+
+  extension:
+    name: Extension (build + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Installer les dépendances
+        working-directory: extension
+        # npm ci nécessite un package-lock.json ; fallback sur npm install s'il est absent
+        # (ex: dépôt fraîchement scaffoldé sans lockfile committé).
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Vérification TypeScript (compile)
+        working-directory: extension
+        run: npm run compile
+
+      - name: Tests
+        working-directory: extension
+        run: npm run test --if-present
+
+      - name: Build
+        working-directory: extension
+        run: npm run build
+
+      - name: Upload de l'artefact extension
+        uses: actions/upload-artifact@v7
+        with:
+          name: extension-build
+          path: extension/.output
+          if-no-files-found: error
+
+  docker:
+    name: Docker (validation build image)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build de l'image serveur (sans push)
+        working-directory: server
+        run: docker build -t ez-dl-server:ci .
