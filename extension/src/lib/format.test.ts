@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatEta, formatProgress, formatSize, formatSpeed } from './format';
+import { formatEta, formatFreeSpace, formatProgress, formatSize, formatSpeed } from './format';
 
 describe('formatSize', () => {
   it('retourne "—" pour null/undefined', () => {
@@ -77,6 +77,24 @@ describe('formatEta', () => {
 
   it('arrondit les secondes fractionnaires', () => {
     expect(formatEta(41.6)).toBe('0:42');
+  });
+});
+
+describe('formatFreeSpace', () => {
+  it('retourne un message explicite si free_bytes ou total_bytes est null/undefined', () => {
+    expect(formatFreeSpace(null, 1000)).toBe('Espace disque inconnu');
+    expect(formatFreeSpace(1000, null)).toBe('Espace disque inconnu');
+    expect(formatFreeSpace(undefined, undefined)).toBe('Espace disque inconnu');
+  });
+
+  it('formate "X libres sur Y" avec les unités de formatSize', () => {
+    const free = Math.round(4.2 * 1024 ** 3);
+    const total = Math.round(1.8 * 1024 ** 4);
+    expect(formatFreeSpace(free, total)).toBe('4,2 Go libres sur 1,8 To');
+  });
+
+  it('gère un dossier plein (0 octet libre)', () => {
+    expect(formatFreeSpace(0, 1024 ** 3)).toBe('0 o libres sur 1,0 Go');
   });
 });
 

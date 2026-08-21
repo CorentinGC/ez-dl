@@ -3,8 +3,8 @@
  * convention de fin de ligne du serveur (`\n` simple ou `\r\n` façon sse-starlette).
  */
 
-import { describe, expect, it } from 'vitest';
-import { errorMessageFromBody, parseJobFrame, splitSseFrames } from './api';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createApiClient, errorMessageFromBody, parseJobFrame, splitSseFrames } from './api';
 
 const JOB_JSON = '{"id":"j1","url":"https://example.com/v.mp4","title":null,"filename":"v.mp4","folder":"/data","status":"downloading","progress":42,"speed":null,"eta":null,"size":null,"error":null,"preset_id":"copy","format_id":null,"created_at":"2026-01-01T00:00:00","updated_at":"2026-01-01T00:00:01"}';
 
@@ -50,6 +50,57 @@ describe('errorMessageFromBody', () => {
   it('retombe sur un message générique pour un corps inattendu', () => {
     expect(errorMessageFromBody(null, 500)).toBe('Erreur serveur (500).');
     expect(errorMessageFromBody({ detail: [] }, 422)).toBe('Erreur serveur (422).');
+  });
+});
+
+describe('createApiClient().createFolder', () => {
+  const config = { baseUrl: 'http://localhost:8000', password: 'secret' };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('envoie un POST /api/folders avec { parent, name } et le header Authorization', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ name: 'Films', path: '/data/Films', is_dir: true }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const entry = await createApiClient(config).createFolder({ parent: '/data', name: 'Films' });
+
+    expect(entry).toEqual({ name: 'Films', path: '/data/Films', is_dir: true });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8000/api/folders');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ parent: '/data', name: 'Films' });
+    expect((init.headers as Headers).get('Authorization')).toBe('Bearer secret');
+  });
+
+  it('remonte le detail lisible du serveur sur 409 (dossier déjà existant)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Le dossier existe déjà.' }), { status: 409 })),
+    );
+
+    await expect(createApiClient(config).createFolder({ parent: '/data', name: 'Films' })).rejects.toMatchObject({
+      message: 'Le dossier existe déjà.',
+      status: 409,
+    });
+  });
+
+  it('remonte le detail lisible du serveur sur 400 (parent hors racine)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Dossier hors racines autorisées.' }), { status: 400 })),
+    );
+
+    await expect(createApiClient(config).createFolder({ parent: '/etc', name: 'x' })).rejects.toMatchObject({
+      message: 'Dossier hors racines autorisées.',
+      status: 400,
+    });
   });
 });
 

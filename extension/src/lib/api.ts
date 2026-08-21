@@ -12,10 +12,12 @@
 
 import type {
   CapabilitiesResponse,
+  CreateFolderRequest,
   CreateJobRequest,
   CreateJobResponse,
   CreateSiteRuleRequest,
   ExtensionSettings,
+  FolderEntry,
   FoldersResponse,
   HealthResponse,
   Job,
@@ -227,6 +229,11 @@ export function createApiClient(config: ApiClientConfig) {
 
     listFolders: (path?: string) =>
       request<FoldersResponse>(config, `/api/folders${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+
+    /** Crée un sous-dossier ; erreurs 400 (hors racine/racine indisponible/nom invalide) et 409
+     * (dossier déjà existant) remontent via `ServerError` avec le `detail` lisible du serveur. */
+    createFolder: (body: CreateFolderRequest) =>
+      request<FolderEntry>(config, '/api/folders', { method: 'POST', body: JSON.stringify(body) }),
 
     createJob: (body: CreateJobRequest) =>
       request<CreateJobResponse>(config, '/api/jobs', { method: 'POST', body: JSON.stringify(body) }),

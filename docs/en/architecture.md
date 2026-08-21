@@ -72,7 +72,7 @@ server/
 │   │   ├── health.py         # GET /api/health
 │   │   ├── capabilities.py   # GET /api/capabilities
 │   │   ├── probe.py          # GET/POST /api/probe
-│   │   ├── folders.py        # GET /api/folders (secure navigation)
+│   │   ├── folders.py        # GET/POST /api/folders (secure navigation + creation)
 │   │   ├── jobs.py           # POST/GET/DELETE /api/jobs, GET /api/jobs/events (SSE)
 │   │   └── rules.py          # GET/POST/DELETE /api/rules
 │   ├── services/
@@ -103,8 +103,12 @@ extension/
 │       ├── main.tsx
 │       └── components/         # video list, quality/folder/preset selector, job tracking (SSE)
 ├── entrypoints/options/       # options page (server URL, password, favorite folders…)
+├── src/components/            # shared popup/options components, including the folder browser
+│                              # (navigation, folder creation, remaining disk space)
+├── src/hooks/                 # shared React hooks (folder browser state…)
 ├── lib/
 │   ├── api.ts                  # HTTP client (fetch + Bearer), typed against the API contract
+│   ├── folders.ts              # pure navigation logic across the allowed roots
 │   ├── storage.ts              # chrome.storage.local / chrome.storage.session wrappers
 │   ├── sniffer.ts              # network detection patterns (extensions, content-types)
 │   └── correlation.ts          # DOM picker ↔ network request correlation (learning mode)
@@ -125,7 +129,9 @@ GET    /api/probe?url=...   -> {url,title,uploader,duration,thumbnail,extractor,
                                 formats:[{format_id,ext,height,width,fps,vcodec,acodec,filesize,tbr,label,has_audio,has_video}],
                                 best_format_id, suggested_filename}
        (POST /api/probe additionally accepts {cookies, headers, referer} for authenticated pages)
-GET    /api/folders?path=   -> {roots:[{label,path}], current:{path,label}, entries:[{name,path,is_dir}], parent}
+GET    /api/folders?path=   -> {roots:[{label,path,is_available,free_bytes,total_bytes}],
+                                current:{path,label,free_bytes,total_bytes}, entries:[{name,path,is_dir}], parent}
+POST   /api/folders         -> body {parent, name} -> 201 {name,path,is_dir}  (409 if already there)
 POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?}
                             -> {job_id, status}
 GET    /api/jobs            -> [job]

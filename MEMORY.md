@@ -106,6 +106,10 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **Binaire yt-dlp du Dockerfile par TARGETARCH** : `yt-dlp_linux` (amd64) vs
   `yt-dlp_linux_aarch64` (arm64). Un asset x86_64 codé en dur casse sur Apple Silicon avec
   « rosetta error: failed to open elf » au premier job.
+- **Routes FastAPI qui touchent le disque : `def`, pas `async def`** — `stat`/`statvfs`/`scandir`
+  sur un montage NAS mort partent en sommeil ininterruptible et figeraient toute la boucle
+  asyncio (health, SSE, jobs en cours). En fonction synchrone, Starlette les exécute en
+  threadpool. Vaut pour `/api/folders` (GET et POST) depuis `ez-dl-wxh`.
 - **La validation de chemin est lexicale, pas physique** : `resolve()` + `is_relative_to` ne dit
   rien d'une racine non montée ou non inscriptible. Depuis `ez-dl-keh`, `root_issue()` vérifie
   existence/dossier/`os.access(W_OK|X_OK)` → `WARNING` au démarrage par racine cassée et

@@ -52,6 +52,18 @@ export function formatEta(seconds: number | null | undefined): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
+/**
+ * Formate l'espace disque restant d'un dossier serveur (ex. `128 Go libres sur 1,8 To`).
+ * `free_bytes`/`total_bytes` valent `null` quand l'espace n'a pas pu être lu (racine non montée) :
+ * message explicite plutôt qu'un simple tiret, pour ne pas laisser croire à une valeur anodine.
+ */
+export function formatFreeSpace(freeBytes: number | null | undefined, totalBytes: number | null | undefined): string {
+  if (freeBytes === null || freeBytes === undefined || totalBytes === null || totalBytes === undefined) {
+    return 'Espace disque inconnu';
+  }
+  return `${formatSize(freeBytes)} libres sur ${formatSize(totalBytes)}`;
+}
+
 /** Formate une progression en pourcentage (0.0–100.0) en entier borné. `null`/`undefined` → `—`. */
 export function formatProgress(progress: number | null | undefined): string {
   if (progress === null || progress === undefined || !Number.isFinite(progress)) return '—';

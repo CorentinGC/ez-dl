@@ -124,10 +124,18 @@ class HealthResponse(BaseModel):
 
 
 class RootOut(BaseModel):
-    """Une racine de téléchargement autorisée."""
+    """Une racine de téléchargement autorisée.
+
+    `is_available` est faux quand la racine est déclarée mais absente/non inscriptible côté
+    serveur : le client doit la montrer désactivée plutôt que de laisser créer un job voué
+    à un `400`. L'espace disque est `None` quand il n'a pas pu être lu.
+    """
 
     label: str
     path: str
+    is_available: bool = True
+    free_bytes: int | None = None
+    total_bytes: int | None = None
 
 
 class FolderEntryOut(BaseModel):
@@ -139,10 +147,23 @@ class FolderEntryOut(BaseModel):
 
 
 class CurrentFolderOut(BaseModel):
-    """Le dossier actuellement navigué."""
+    """Le dossier actuellement navigué, avec l'espace disque du volume qui le porte."""
 
     path: str
     label: str
+    free_bytes: int | None = None
+    total_bytes: int | None = None
+
+
+class FolderCreate(BaseModel):
+    """Corps de `POST /api/folders` : création d'un sous-dossier sous une racine autorisée.
+
+    Les longueurs sont bornées ici : sans cela, un chemin dépassant `PATH_MAX` fait remonter
+    `ENAMETOOLONG` depuis les appels système (`500` au lieu d'un `400` explicite).
+    """
+
+    parent: str = Field(max_length=1024)
+    name: str = Field(min_length=1, max_length=180)
 
 
 class FoldersResponse(BaseModel):

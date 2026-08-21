@@ -72,7 +72,7 @@ server/
 │   │   ├── health.py         # GET /api/health
 │   │   ├── capabilities.py   # GET /api/capabilities
 │   │   ├── probe.py          # GET/POST /api/probe
-│   │   ├── folders.py        # GET /api/folders (navigation sécurisée)
+│   │   ├── folders.py        # GET/POST /api/folders (navigation + création sécurisées)
 │   │   ├── jobs.py           # POST/GET/DELETE /api/jobs, GET /api/jobs/events (SSE)
 │   │   └── rules.py          # GET/POST/DELETE /api/rules
 │   ├── services/
@@ -103,8 +103,12 @@ extension/
 │       ├── main.tsx
 │       └── components/         # liste vidéos, sélecteur qualité/dossier/preset, suivi jobs (SSE)
 ├── entrypoints/options/       # page d'options (URL serveur, mot de passe, dossiers favoris…)
+├── src/components/            # composants partagés popup/options, dont le navigateur de dossiers
+│                              # (navigation, création de dossier, espace disque restant)
+├── src/hooks/                 # hooks React partagés (état du navigateur de dossiers…)
 ├── lib/
 │   ├── api.ts                  # client HTTP (fetch + Bearer), typé sur le contrat d'API
+│   ├── folders.ts              # logique pure de navigation dans l'arborescence des racines
 │   ├── storage.ts              # wrappers chrome.storage.local / chrome.storage.session
 │   ├── sniffer.ts              # patterns de détection réseau (extensions, content-types)
 │   └── correlation.ts          # corrélation picker DOM ↔ requêtes réseau (mode apprentissage)
@@ -125,7 +129,9 @@ GET    /api/probe?url=...   -> {url,title,uploader,duration,thumbnail,extractor,
                                 formats:[{format_id,ext,height,width,fps,vcodec,acodec,filesize,tbr,label,has_audio,has_video}],
                                 best_format_id, suggested_filename}
        (POST /api/probe accepte en plus {cookies, headers, referer} pour les pages authentifiées)
-GET    /api/folders?path=   -> {roots:[{label,path}], current:{path,label}, entries:[{name,path,is_dir}], parent}
+GET    /api/folders?path=   -> {roots:[{label,path,is_available,free_bytes,total_bytes}],
+                                current:{path,label,free_bytes,total_bytes}, entries:[{name,path,is_dir}], parent}
+POST   /api/folders         -> body {parent, name} -> 201 {name,path,is_dir}  (409 si déjà existant)
 POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?}
                             -> {job_id, status}
 GET    /api/jobs            -> [job]

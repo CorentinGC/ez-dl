@@ -93,12 +93,27 @@ export interface ProbeRequestBody {
 }
 
 // ---------------------------------------------------------------------------
-// Contrat serveur — GET /api/folders
+// Contrat serveur — GET/POST /api/folders
 // ---------------------------------------------------------------------------
 
+/** Racine de téléchargement déclarée côté serveur (`EZDL_DOWNLOAD_ROOTS`). */
 export interface FolderRoot {
   label: string;
   path: string;
+  /** `false` = racine déclarée mais non montée/non inscriptible : à afficher désactivée, jamais masquée. */
+  is_available: boolean;
+  /** Octets libres, `null` si l'espace disque n'a pas pu être lu (racine non montée). */
+  free_bytes: number | null;
+  /** Octets totaux, `null` si l'espace disque n'a pas pu être lu (racine non montée). */
+  total_bytes: number | null;
+}
+
+/** Dossier actuellement parcouru (résultat de `GET /api/folders?path=...`), toujours disponible. */
+export interface FolderCurrent {
+  path: string;
+  label: string;
+  free_bytes: number | null;
+  total_bytes: number | null;
 }
 
 export interface FolderEntry {
@@ -109,9 +124,15 @@ export interface FolderEntry {
 
 export interface FoldersResponse {
   roots: FolderRoot[];
-  current: FolderRoot | null;
+  current: FolderCurrent | null;
   entries: FolderEntry[];
   parent: string | null;
+}
+
+/** Corps du POST /api/folders : crée `name` dans le dossier `parent` (chemin absolu). */
+export interface CreateFolderRequest {
+  parent: string;
+  name: string;
 }
 
 // ---------------------------------------------------------------------------

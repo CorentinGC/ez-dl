@@ -288,16 +288,82 @@ h2 {
 
 .folder-browser-item {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   text-align: left;
   border: none;
   background: transparent;
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
+  color: var(--ez-text);
 }
 
 .folder-browser-item:hover {
   background: var(--ez-bg-hover);
+}
+
+.folder-browser-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.folder-browser-item:disabled:hover {
+  background: transparent;
+}
+
+.folder-browser-item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-browser-item-space {
+  font-size: 11px;
+  color: var(--ez-text-muted);
+  white-space: nowrap;
+}
+
+.folder-browser-item-breadcrumb {
+  font-weight: 600;
+  color: var(--ez-accent);
+}
+
+.folder-browser-empty {
+  padding: 6px;
+  color: var(--ez-text-muted);
+  font-size: 12px;
+}
+
+.folder-browser-space {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ez-text-muted);
+}
+
+.folder-browser-new-toggle {
+  align-self: flex-start;
+}
+
+.folder-browser-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--ez-border);
+  padding-top: 6px;
+}
+
+.folder-browser-new-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.folder-browser-new-row .field-input {
+  flex: 1;
 }
 
 .folder-browser-actions {

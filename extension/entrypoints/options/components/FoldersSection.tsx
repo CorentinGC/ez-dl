@@ -3,7 +3,8 @@
  * réordonnancement (haut/bas) et choix du favori par défaut.
  */
 
-import { FolderBrowseList, useFolderBrowser } from '@/src/components/FolderBrowser';
+import { FolderBrowserPanel } from '@/src/components/FolderBrowser';
+import { useFolderBrowser } from '@/src/hooks/useFolderBrowser';
 import type { ApiClient } from '@/src/lib/api';
 import type { ExtensionSettings, FavoriteFolder } from '@/src/lib/types';
 
@@ -111,20 +112,21 @@ async function removeFavorite(settings: ExtensionSettings, onUpdate: FoldersSect
 }
 
 function AddFavorite({ apiClient, settings, onUpdate }: { apiClient: ApiClient; settings: ExtensionSettings; onUpdate: FoldersSectionProps['onUpdate'] }) {
-  const { browsing, folders, loading, error, open, close } = useFolderBrowser(apiClient);
-
-  const addCurrent = async () => {
-    const current = folders?.current;
-    if (!current) return;
-    if (settings.favoriteFolders.some((f) => f.path === current.path)) {
-      close();
-      return;
-    }
-    const favoriteFolders = [...settings.favoriteFolders, { path: current.path, label: current.label }];
-    const defaultFolderPath = settings.defaultFolderPath ?? current.path;
-    await onUpdate({ favoriteFolders, defaultFolderPath });
-    close();
+  const addFavorite = (path: string, label: string) => {
+    if (settings.favoriteFolders.some((f) => f.path === path)) return;
+    const favoriteFolders = [...settings.favoriteFolders, { path, label }];
+    const defaultFolderPath = settings.defaultFolderPath ?? path;
+    void onUpdate({ favoriteFolders, defaultFolderPath });
   };
+
+  const folderBrowser = useFolderBrowser(apiClient, {
+    // Créer un dossier revient à l'ajouter immédiatement aux favoris (sélection automatique).
+    onFolderCreated: (path, label) => {
+      addFavorite(path, label);
+      folderBrowser.close();
+    },
+  });
+  const { browsing, open, close } = folderBrowser;
 
   return (
     <div className="folder-add">
@@ -133,30 +135,14 @@ function AddFavorite({ apiClient, settings, onUpdate }: { apiClient: ApiClient; 
           Ajouter un dossier…
         </button>
       ) : (
-        <div className="folder-browser" role="dialog" aria-label="Parcourir les dossiers du serveur">
-          {loading ? <p className="folder-browser-status">Chargement…</p> : null}
-          {error ? (
-            <p className="field-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          {folders && !loading ? (
-            <>
-              <p className="folder-browser-current">{folders.current?.label ?? folders.current?.path ?? 'Racines disponibles'}</p>
-              <FolderBrowseList folders={folders} onNavigate={open} />
-              <div className="folder-browser-actions">
-                {folders.current ? (
-                  <button type="button" className="btn btn-primary" onClick={() => void addCurrent()}>
-                    Ajouter ce dossier
-                  </button>
-                ) : null}
-                <button type="button" className="btn btn-secondary" onClick={close}>
-                  Annuler
-                </button>
-              </div>
-            </>
-          ) : null}
-        </div>
+        <FolderBrowserPanel
+          state={folderBrowser}
+          primaryActionLabel="Ajouter ce dossier"
+          onSelectCurrent={(path, label) => {
+            addFavorite(path, label);
+            close();
+          }}
+        />
       )}
     </div>
   );
