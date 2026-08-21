@@ -47,9 +47,9 @@ class Job(SQLModel, table=True):
     folder: str
     status: str = Field(default=JobStatus.QUEUED.value, index=True)
     progress: float = 0.0
-    speed: str | None = None
-    eta: str | None = None
-    size: str | None = None
+    speed: float | None = None  # octets/s
+    eta: int | None = None  # secondes restantes
+    size: int | None = None  # octets (taille finale une fois le job terminé)
     error: str | None = None
     preset_id: str | None = None
     format_id: str | None = None

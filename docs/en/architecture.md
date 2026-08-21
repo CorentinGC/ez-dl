@@ -150,9 +150,9 @@ DELETE /api/rules/{id}      -> deletes
 | `folder` | str | Destination path, resolved under an `EZDL_DOWNLOAD_ROOTS` root |
 | `status` | enum | See lifecycle below |
 | `progress` | float | 0.0–100.0 |
-| `speed` | str? | Current download speed (e.g. `"3.2MiB/s"`) |
-| `eta` | str? | Estimated time remaining |
-| `size` | int? | Size in bytes, known once the download has started |
+| `speed` | float? | Current download speed, in bytes/s |
+| `eta` | int? | Estimated time remaining, in seconds |
+| `size` | int? | Size in bytes; total size known once the download has started, actual file size once `done` |
 | `error` | str? | Error message if `status == error` |
 | `preset_id` | str? | Chosen ffmpeg conversion preset (`copy` by default) |
 | `format_id` | str? | Chosen yt-dlp format |

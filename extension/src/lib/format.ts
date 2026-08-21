@@ -1,28 +1,48 @@
 /**
- * Formatage lisible de tailles, débits, durées et ETA — utilisé par la popup (fiches source
- * et suivi des jobs). Fonctions pures.
+ * Formatage lisible de tailles, débits, durées et progression — utilisé par la popup (fiches
+ * source et suivi des jobs). Fonctions pures, décimales en virgule (convention FR).
+ *
+ * Contrat serveur (`/api/jobs`, voir `types.ts`) : `speed` en octets/s, `eta` en secondes,
+ * `size` en octets, `progress` en pourcentage 0.0–100.0.
  */
 
 const UNITS = ['o', 'Ko', 'Mo', 'Go', 'To'];
 
-/** Formate un nombre d'octets en unité lisible (ex. `12.3 Mo`). */
-export function formatBytes(bytes: number | null | undefined): string {
+/** Exposant d'unité (0 = octets, 1 = Ko, ...) pour une quantité d'octets strictement positive. */
+function unitExponent(bytes: number): number {
+  return Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), UNITS.length - 1);
+}
+
+/**
+ * Formate une quantité déjà ramenée à son unité : entier si >= 10 ou en octets bruts (exposant 0),
+ * sinon une décimale avec virgule (convention FR) pour rester compact et lisible.
+ */
+function formatQuantity(value: number, exponent: number): string {
+  const unit = UNITS[exponent] ?? 'o';
+  const useDecimal = exponent > 0 && value < 10;
+  const rounded = useDecimal ? Math.round(value * 10) / 10 : Math.round(value);
+  const options = useDecimal ? { minimumFractionDigits: 1, maximumFractionDigits: 1 } : undefined;
+  return `${rounded.toLocaleString('fr-FR', options)} ${unit}`;
+}
+
+/** Formate une taille en octets vers une unité lisible (ex. `4,2 Mo`). `null`/`undefined` → `—`. */
+export function formatSize(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return '—';
   if (bytes === 0) return '0 o';
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), UNITS.length - 1);
-  const value = bytes / 1024 ** exponent;
-  const unit = UNITS[exponent] ?? 'o';
-  return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${unit}`;
+  const exponent = unitExponent(bytes);
+  return formatQuantity(bytes / 1024 ** exponent, exponent);
 }
 
-/** Formate une vitesse de téléchargement en octets/s (ex. `1.2 Mo/s`). */
+/** Formate une vitesse de téléchargement en octets/s (ex. `1,2 Mo/s`). `null`/`undefined` → `—`. */
 export function formatSpeed(bytesPerSecond: number | null | undefined): string {
-  if (bytesPerSecond === null || bytesPerSecond === undefined || !Number.isFinite(bytesPerSecond)) return '—';
-  return `${formatBytes(bytesPerSecond)}/s`;
+  if (bytesPerSecond === null || bytesPerSecond === undefined || !Number.isFinite(bytesPerSecond) || bytesPerSecond < 0) {
+    return '—';
+  }
+  return `${formatSize(bytesPerSecond)}/s`;
 }
 
-/** Formate une durée en secondes en `hh:mm:ss` ou `mm:ss`. */
-export function formatDuration(seconds: number | null | undefined): string {
+/** Formate un temps restant estimé (secondes) en `mm:ss` ou `h:mm:ss`. `null`/`undefined` → `—`. */
+export function formatEta(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return '—';
   const total = Math.round(seconds);
   const h = Math.floor(total / 3600);
@@ -32,8 +52,8 @@ export function formatDuration(seconds: number | null | undefined): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-/** Formate une progression [0..1] en pourcentage entier. */
+/** Formate une progression en pourcentage (0.0–100.0) en entier borné. `null`/`undefined` → `—`. */
 export function formatProgress(progress: number | null | undefined): string {
   if (progress === null || progress === undefined || !Number.isFinite(progress)) return '—';
-  return `${Math.round(Math.min(Math.max(progress, 0), 1) * 100)}%`;
+  return `${Math.round(Math.min(Math.max(progress, 0), 100))}%`;
 }

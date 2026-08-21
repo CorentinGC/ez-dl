@@ -3,7 +3,7 @@
  * vitesse, ETA et annulation. `aria-live` sur la liste pour annoncer les mises à jour.
  */
 
-import { formatDuration, formatProgress, formatSpeed } from '@/src/lib/format';
+import { formatEta, formatProgress, formatSize, formatSpeed } from '@/src/lib/format';
 import type { Job, JobStatus } from '@/src/lib/types';
 import type { JobsConnectionMode } from '../hooks/useJobs';
 
@@ -50,7 +50,8 @@ export function JobsView({ jobs, connectionMode, onCancel }: JobsViewProps) {
 }
 
 function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
-  const progressPct = job.progress !== null ? Math.round(Math.min(Math.max(job.progress, 0), 1) * 100) : null;
+  // job.progress est déjà un pourcentage 0.0–100.0 (contrat serveur), pas une fraction 0–1.
+  const progressPct = job.progress !== null ? Math.round(Math.min(Math.max(job.progress, 0), 100)) : null;
   const cancellable = CANCELLABLE_STATUSES.includes(job.status);
   const label = job.title || job.filename;
 
@@ -77,7 +78,12 @@ function JobRow({ job, onCancel }: { job: Job; onCancel: () => void }) {
       ) : null}
 
       <p className="job-row-meta">
-        {[formatProgress(job.progress), formatSpeed(job.speed), job.eta !== null ? `ETA ${formatDuration(job.eta)}` : null]
+        {[
+          formatProgress(job.progress),
+          formatSpeed(job.speed),
+          job.eta !== null ? `ETA ${formatEta(job.eta)}` : null,
+          job.size !== null ? formatSize(job.size) : null,
+        ]
           .filter(Boolean)
           .join(' · ')}
       </p>

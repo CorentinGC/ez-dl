@@ -156,9 +156,9 @@ class JobOut(BaseModel):
     folder: str
     status: JobStatus
     progress: float
-    speed: str | None = None
-    eta: str | None = None
-    size: str | None = None
+    speed: float | None = None  # octets/s
+    eta: int | None = None  # secondes restantes
+    size: int | None = None  # octets
     error: str | None = None
     preset_id: str | None = None
     format_id: str | None = None

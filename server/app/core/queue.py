@@ -64,29 +64,25 @@ class JobBroadcaster:
 
 
 def _progress_fields(data: dict[str, Any]) -> dict[str, Any]:
-    """Convertit un évènement de progression yt-dlp brut en champs de job."""
+    """Convertit un évènement de progression yt-dlp brut en champs de job.
+
+    Les valeurs restent numériques brutes (octets, octets/s, secondes) conformément au
+    contrat d'API (`speed: float|null`, `eta: int|null`, `size: int|null`) : le formatage
+    lisible (ex. `"3.2 MB/s"`) est de la responsabilité du client.
+    """
     fields: dict[str, Any] = {}
     downloaded = data.get("downloaded_bytes") or 0
     total = data.get("total_bytes") or data.get("total_bytes_estimate")
     if total:
         fields["progress"] = round(min(downloaded / total, 1.0) * 100, 1)
-        fields["size"] = ytdlp.format_size(total)
+        fields["size"] = int(total)
     speed = data.get("speed")
     if speed:
-        fields["speed"] = f"{ytdlp.format_size(speed)}/s"
+        fields["speed"] = float(speed)
     eta = data.get("eta")
     if eta is not None:
-        fields["eta"] = _format_eta(int(eta))
+        fields["eta"] = int(eta)
     return fields
-
-
-def _format_eta(seconds: int) -> str:
-    """Formate un ETA en secondes en `mm:ss` (ou `h:mm:ss` au-delà d'une heure)."""
-    minutes, secs = divmod(max(seconds, 0), 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs:02d}"
 
 
 def _atomic_move(source: Path, destination: Path) -> None:
@@ -284,11 +280,16 @@ class JobQueue:
         return converted_path
 
     def _move_phase(self, session: Session, job: Job, source: Path, destination: Path) -> None:
-        """Étape finale : déplacement atomique vers la destination, puis statut `done`."""
+        """Étape finale : déplacement atomique vers la destination, puis statut `done`.
+
+        `size` est recalculé sur le fichier final (taille réelle après conversion
+        éventuelle), plutôt que de conserver la dernière estimation de téléchargement.
+        """
         self._update_job(session, job, status=JobStatus.MOVING)
         try:
             _atomic_move(source, destination)
         except OSError as exc:
             self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
             return
-        self._update_job(session, job, status=JobStatus.DONE, progress=100.0)
+        final_size = destination.stat().st_size
+        self._update_job(session, job, status=JobStatus.DONE, progress=100.0, size=final_size)

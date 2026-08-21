@@ -123,9 +123,13 @@ export interface Job {
   filename: string;
   folder: string;
   status: JobStatus;
+  /** Avancement du téléchargement, en pourcentage (0.0–100.0). `null` tant qu'inconnu. */
   progress: number | null;
+  /** Vitesse de téléchargement courante, en octets par seconde (o/s). `null` tant qu'inconnue. */
   speed: number | null;
+  /** Temps restant estimé, en secondes (s). `null` tant qu'inconnu. */
   eta: number | null;
+  /** Taille totale du fichier, en octets (o). `null` tant qu'inconnue. */
   size: number | null;
   error: string | null;
   preset_id: string | null;
