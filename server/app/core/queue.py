@@ -85,6 +85,28 @@ def _progress_fields(data: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
+# Résidus laissés par yt-dlp dans le dossier de travail (téléchargement partiel, état de
+# reprise, fragments) : jamais le fichier final, même quand ils survivent à un succès.
+_LEFTOVER_SUFFIXES = (".part", ".ytdl", ".temp")
+
+
+def _downloaded_file(work_dir: Path) -> Path:
+    """Retourne le fichier produit par yt-dlp dans son dossier de travail dédié.
+
+    Le nom de sortie n'est pas prédictible : yt-dlp impose l'extension du conteneur
+    réellement produit (un merge/remux peut la changer). On prend donc le plus gros
+    fichier restant, hors résidus.
+    """
+    candidates = [
+        path
+        for path in work_dir.iterdir()
+        if path.is_file() and not path.suffix.startswith(_LEFTOVER_SUFFIXES)
+    ]
+    if not candidates:
+        raise RuntimeError("yt-dlp n'a produit aucun fichier")
+    return max(candidates, key=lambda path: path.stat().st_size)
+
+
 def _atomic_move(source: Path, destination: Path) -> None:
     """Déplace `source` vers `destination` ; repli sur une copie si périphérique différent."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -203,28 +225,37 @@ class JobQueue:
                 self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
                 return
 
-            temp_path = await self._download_phase(session, job, context)
-            if temp_path is None:
-                return
-            source = await self._convert_phase(session, job, temp_path)
-            if source is None:
-                return
-            self._move_phase(session, job, source, destination)
+            # Dossier de travail dédié : yt-dlp choisit lui-même le nom final du fichier,
+            # l'isoler permet de le retrouver sans le deviner. Supprimé quoi qu'il arrive.
+            work_dir = self._settings.temp_dir / job_id
+            try:
+                temp_path = await self._download_phase(session, job, context, work_dir)
+                if temp_path is None:
+                    return
+                source = await self._convert_phase(session, job, temp_path, work_dir)
+                if source is None:
+                    return
+                self._move_phase(session, job, source, destination)
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
 
-    async def _download_phase(self, session: Session, job: Job, context: JobContext) -> Path | None:
-        """Télécharge le job vers un fichier temporaire.
+    async def _download_phase(
+        self, session: Session, job: Job, context: JobContext, work_dir: Path
+    ) -> Path | None:
+        """Télécharge le job dans `work_dir`.
 
-        Retourne son chemin, ou `None` en cas d'échec/annulation.
+        Retourne le chemin du fichier produit, ou `None` en cas d'échec/annulation.
         """
-        self._settings.temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = self._settings.temp_dir / f"{job.id}.part"
+        work_dir.mkdir(parents=True, exist_ok=True)
         job_id = job.id
         with cookie_jar_file(context.cookies, self._settings.temp_dir) as cookies_file:
             try:
                 job = self._update_job(session, job, status=JobStatus.DOWNLOADING)
                 process = await ytdlp.start_download(
                     job.url,
-                    temp_path,
+                    # `%(ext)s` : le conteneur réel n'est connu qu'après un éventuel
+                    # merge/remux, yt-dlp l'impose au nom de sortie.
+                    work_dir / "download.%(ext)s",
                     binary=self._settings.ytdlp_binary,
                     format_id=job.format_id,
                     cookies_file=cookies_file,
@@ -240,6 +271,7 @@ class JobQueue:
 
                 await ytdlp.stream_progress(process, on_progress)
                 await ytdlp.wait_download(process)
+                return _downloaded_file(work_dir)
             except Exception as exc:
                 if job_id in self._cancel_requested:
                     self._update_job(session, job, status=JobStatus.CANCELED)
@@ -247,16 +279,17 @@ class JobQueue:
                     logger.warning("Échec téléchargement job %s : %s", job_id, exc)
                     self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
                 return None
-        return temp_path
 
-    async def _convert_phase(self, session: Session, job: Job, temp_path: Path) -> Path | None:
+    async def _convert_phase(
+        self, session: Session, job: Job, temp_path: Path, work_dir: Path
+    ) -> Path | None:
         """Conversion optionnelle. Retourne le chemin source final, ou `None` en cas d'échec."""
         preset = self._resolve_preset(job.preset_id)
         if preset is None:
             return temp_path
         job_id = job.id
         self._update_job(session, job, status=JobStatus.CONVERTING)
-        converted_path = self._settings.temp_dir / f"{job_id}.converted.{preset.container}"
+        converted_path = work_dir / f"converted.{preset.container}"
         args = ffmpeg.build_conversion_args(preset, str(temp_path), str(converted_path))
         try:
             process = await asyncio.create_subprocess_exec(

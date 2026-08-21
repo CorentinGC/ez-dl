@@ -187,6 +187,9 @@ queued ──▶ probing ──▶ downloading ──▶ converting ──▶ mo
 - **`queued`** : job créé, en attente d'un slot de worker libre.
 - **`probing`** : yt-dlp interroge la source pour confirmer les formats disponibles.
 - **`downloading`** : téléchargement en cours, `progress`/`speed`/`eta` mis à jour périodiquement.
+  Chaque job travaille dans son propre dossier `EZDL_TEMP_DIR/<job_id>` : le nom de sortie de
+  yt-dlp n'est pas prédictible (il impose l'extension du conteneur réellement produit, qu'un
+  merge/remux peut changer), le serveur récupère donc le fichier effectivement écrit.
 - **`converting`** : ffmpeg réencode selon le `preset_id` choisi (étape sautée si `preset_id ==
   "copy"` ou absent).
 - **`moving`** : déplacement atomique du fichier temporaire (`EZDL_TEMP_DIR`) vers `folder`, après

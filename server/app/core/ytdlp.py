@@ -170,7 +170,7 @@ async def probe(
 
 async def start_download(
     url: str,
-    destination: Path,
+    output_template: Path,
     *,
     binary: str = "yt-dlp",
     format_id: str | None = None,
@@ -178,7 +178,13 @@ async def start_download(
     headers: dict[str, str] | None = None,
     referer: str | None = None,
 ) -> asyncio.subprocess.Process:
-    """Démarre le téléchargement en subprocess et retourne le process (suivi/annulation)."""
+    """Démarre le téléchargement en subprocess et retourne le process (suivi/annulation).
+
+    `output_template` est un **template** `-o` yt-dlp, pas un chemin final : yt-dlp y
+    substitue les champs `%(...)s` et impose l'extension du conteneur réellement produit
+    (un merge/remux peut changer le conteneur en cours de route). L'appelant doit donc
+    retrouver le fichier produit après coup plutôt que de présumer son nom.
+    """
     args = [
         binary,
         "--newline",
@@ -186,7 +192,7 @@ async def start_download(
         "--progress-template",
         PROGRESS_TEMPLATE,
         "-o",
-        str(destination),
+        str(output_template),
     ]
     if format_id:
         args += ["-f", format_id]

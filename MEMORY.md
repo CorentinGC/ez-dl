@@ -106,6 +106,11 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **Binaire yt-dlp du Dockerfile par TARGETARCH** : `yt-dlp_linux` (amd64) vs
   `yt-dlp_linux_aarch64` (arm64). Un asset x86_64 codé en dur casse sur Apple Silicon avec
   « rosetta error: failed to open elf » au premier job.
+- **Le nom de sortie de yt-dlp n'est PAS prédictible** : `-o` reçoit un *template*, et yt-dlp
+  impose l'extension du conteneur réellement produit (un merge/remux la change en cours de
+  route). `-o <dir>/<id>.part` produit `<id>.part.mp4` → `[Errno 2]` à 100 % au moment du
+  déplacement (`ez-dl-1i9`). Correctif : un dossier de travail par job + récupération du fichier
+  réellement écrit (`_downloaded_file`), jamais un nom deviné.
 - **SSE : sse-starlette émet des fins de ligne `\r\n`** : tout parsing côté client doit découper
   les frames sur `\r?\n\r?\n`, jamais sur `'\n\n'` littéral (bug corrigé dans `api.ts`).
 - **Chrome de marque ≥ 137 ne supporte plus `--load-extension`** : pour tester l'extension
