@@ -1,24 +1,35 @@
 # Override GPU NVIDIA pour ez-dl — active l'encodage matériel (h264_nvenc/hevc_nvenc).
 #
 # Usage :
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#   (--build nécessaire au premier lancement : le build arg FFMPEG_VARIANT ci-dessous
+#   change l'origine de ffmpeg, docker compose ne reconstruit pas automatiquement une
+#   image déjà buildée avec la variante "debian" par défaut)
 #
 # Prérequis sur l'hôte :
 #   - Pilote NVIDIA installé + nvidia-container-toolkit configuré pour Docker
 #     (voir https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 #   - `docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi` doit fonctionner
+#   - Plateforme amd64 obligatoire : le binaire ffmpeg NVENC (BtbN linux64-gpl) n'est pas
+#     publié pour arm64 (voir server/Dockerfile, stage `ffmpeg-nvenc`).
 #
-# IMPORTANT : le ffmpeg installé dans server/Dockerfile est le paquet Debian (apt) par défaut,
-# qui n'embarque PAS le support NVENC (dépendances non-libres). Avec ce seul override, aucun
-# preset `*_nvenc` n'apparaîtra dans /api/capabilities (ffmpeg -encoders ne les listera pas).
-# Pour un encodage matériel réel, remplacez l'étape d'installation ffmpeg du Dockerfile par une
-# image/paquet ffmpeg compilé avec NVENC (ex: jrottenberg/ffmpeg:*-nvidia comme référence de build,
-# ou une compilation maison --enable-nvenc --enable-cuda) puis reconstruisez l'image serveur.
+# Le ffmpeg installé par défaut dans server/Dockerfile est le paquet Debian (apt), qui
+# n'embarque PAS le support NVENC (dépendances non-libres exclues des dépôts Debian). Ce
+# fichier positionne le build arg FFMPEG_VARIANT=nvenc pour que l'image serveur embarque à
+# la place le binaire statique BtbN/FFmpeg-Builds (variante linux64-gpl, self-contained,
+# NVENC inclus) — voir server/Dockerfile pour le détail des stages.
 
 services:
   server:
+    build:
+      args:
+        FFMPEG_VARIANT: nvenc
+
     environment:
       NVIDIA_VISIBLE_DEVICES: all
+      # `video` est requis en plus de `compute`/`utility` : c'est la capability qui expose
+      # libnvidia-encode (NVENC) dans le conteneur via nvidia-container-toolkit. Sans elle,
+      # ffmpeg peut détecter l'encodeur nvenc mais échoue à l'exécution (init NVENC impossible).
       NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
 
     # Méthode recommandée (Docker Compose v2 + nvidia-container-toolkit en mode CDI/legacy) :

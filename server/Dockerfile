@@ -2,9 +2,58 @@
 #
 # Image du serveur ez-dl (FastAPI + yt-dlp + ffmpeg).
 # Contexte de build attendu : ./server (voir docker-compose.yml).
+#
+# ARG FFMPEG_VARIANT (debian|nvenc, défaut: debian) — sélectionne la provenance de
+# ffmpeg/ffprobe dans l'image finale :
+#   - debian : paquet ffmpeg du dépôt Debian (apt). Comportement historique inchangé.
+#     N'inclut PAS NVENC (dépendances non-libres exclues des dépôts officiels Debian).
+#   - nvenc  : binaire statique BtbN/FFmpeg-Builds, variante `linux64-gpl` (self-contained,
+#     inclut l'encodage matériel NVIDIA NVENC). Uniquement disponible en amd64 : BtbN ne
+#     publie pas de build `linux64` pour arm64. Sans conséquence pratique puisque NVENC est
+#     une technologie NVIDIA (pas de carte NVIDIA sur les hôtes arm64 typiques).
+#     Sélection : `docker build --build-arg FFMPEG_VARIANT=nvenc ./server`
+#     (docker-compose.gpu.yml positionne cet arg automatiquement).
+ARG FFMPEG_VARIANT=debian
 
 # =============================================================================
-# Stage 1/2 : builder — résout et installe les dépendances Python via uv
+# Stage ffmpeg-nvenc — binaire statique BtbN/FFmpeg-Builds (linux64-gpl, inclut NVENC)
+#
+# Stage dédié pour le cache : le téléchargement (~90 Mo) reste en cache tant que l'URL
+# ne change pas, indépendamment du reste du build. Ce stage n'est construit par BuildKit
+# que si FFMPEG_VARIANT=nvenc (résolu via le stage `final-${FFMPEG_VARIANT}` plus bas) —
+# la variante debian par défaut ne le télécharge donc jamais. Le build BtbN GPL est
+# statiquement lié (aucune dépendance partagée hors libc) : copier uniquement les deux
+# binaires suffit, contrairement au paquet ffmpeg Debian (voir stage `final-debian`, qui a
+# besoin de ses dépendances partagées libavcodec/libx264/... installées par apt).
+# =============================================================================
+FROM python:3.13-slim-bookworm AS ffmpeg-nvenc
+
+# BtbN ne publie un build `linux64` que pour amd64 : on échoue explicitement plutôt que
+# de laisser passer un binaire incompatible si l'image est construite pour une autre
+# plateforme (ex: arm64 via `docker buildx build --platform linux/arm64`).
+ARG TARGETARCH
+RUN if [ "${TARGETARCH}" != "amd64" ]; then \
+        echo "FFMPEG_VARIANT=nvenc requiert une plateforme amd64 (BtbN linux64-gpl) ; TARGETARCH=${TARGETARCH} n'est pas supporte." >&2; \
+        exit 1; \
+    fi
+
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        xz-utils \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# URL "latest" stable : suit toujours la dernière release BtbN sans figer de date de build.
+RUN curl -fL --retry 3 -o /tmp/ffmpeg.tar.xz \
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" \
+    && mkdir -p /tmp/ffmpeg-extract /out \
+    && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-extract --strip-components=1 \
+    && cp /tmp/ffmpeg-extract/bin/ffmpeg /tmp/ffmpeg-extract/bin/ffprobe /out/ \
+    && chmod 755 /out/ffmpeg /out/ffprobe \
+    && rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-extract
+
+# =============================================================================
+# Stage builder — résout et installe les dépendances Python via uv
 # =============================================================================
 FROM python:3.13-slim-bookworm AS builder
 
@@ -42,20 +91,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY . .
 
 # =============================================================================
-# Stage 2/2 : image finale — runtime minimal, non-root, ffmpeg + yt-dlp standalone
+# Stage final-base — commun aux deux variantes : tout sauf l'installation de ffmpeg
 # =============================================================================
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm AS final-base
 
 # UID/GID paramétrables pour aligner l'utilisateur du conteneur avec le propriétaire
 # des volumes montés (NAS, partage réseau, etc.) et éviter les problèmes de droits.
 ARG PUID=1000
 ARG PGID=1000
 
-# ffmpeg/ffprobe : conversion vidéo (contrat EZDL_FFMPEG_BINARY).
 # ca-certificates : TLS pour les appels sortants (yt-dlp, self-update, extracteurs).
 # curl : utilisé par le HEALTHCHECK et pour télécharger le binaire yt-dlp ci-dessous.
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
         ca-certificates \
         curl \
     && rm -rf /var/lib/apt/lists/*
@@ -83,6 +130,37 @@ COPY --chown=${PUID}:${PGID} . .
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
+
+# =============================================================================
+# Stage final-debian — ffmpeg via apt (comportement historique, variante par défaut)
+# =============================================================================
+FROM final-base AS final-debian
+
+# ffmpeg/ffprobe (contrat EZDL_FFMPEG_BINARY) : paquet Debian. Ses dépendances partagées
+# (libavcodec, libx264, libmp3lame...) sont installées dans ce même layer par apt — c'est
+# pourquoi cette variante installe ffmpeg ici plutôt que de copier un binaire isolé.
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# Stage final-nvenc — ffmpeg statique BtbN (linux64-gpl, inclut NVENC)
+# =============================================================================
+FROM final-base AS final-nvenc
+
+# Binaire statique (aucune lib partagée à installer) copié depuis le stage ffmpeg-nvenc.
+COPY --from=ffmpeg-nvenc /out/ffmpeg /out/ffprobe /usr/local/bin/
+
+# =============================================================================
+# Stage final — résout FFMPEG_VARIANT vers final-debian ou final-nvenc.
+#
+# `FROM` (contrairement à `COPY --from=`) supporte l'expansion d'un ARG de portée globale
+# (FFMPEG_VARIANT, déclaré avant le tout premier FROM du fichier) — c'est le mécanisme de
+# sélection de variante documenté par BuildKit. BuildKit ne construit alors que le stage
+# effectivement référencé (final-debian OU final-nvenc), jamais les deux : la variante
+# debian par défaut ne télécharge donc jamais le binaire BtbN, et inversement.
+# =============================================================================
+FROM final-${FFMPEG_VARIANT} AS final
 
 USER ezdl
 

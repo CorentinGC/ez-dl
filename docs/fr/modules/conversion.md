@@ -41,6 +41,34 @@ Le popup n'affiche donc jamais un preset inutilisable sur le serveur cible.
 Chaque preset définit : le conteneur de sortie, le codec vidéo (ou l'absence de piste vidéo pour les
 presets audio), et les arguments ffmpeg associés (`args_preview` exposé pour transparence côté UI).
 
+## Support NVENC dans l'image Docker
+
+Le ffmpeg installé par défaut dans `server/Dockerfile` (paquet Debian, build arg
+`FFMPEG_VARIANT=debian`) **n'inclut pas** les encodeurs NVENC : les dépôts Debian excluent les
+dépendances non-libres requises par NVIDIA. Résultat : même avec le passthrough GPU de
+`docker-compose.gpu.yml`, `ffmpeg -encoders` ne liste pas `h264_nvenc`/`hevc_nvenc`, et ces
+presets n'apparaissent jamais dans `/api/capabilities`.
+
+Pour activer NVENC, reconstruire l'image serveur avec la variante `nvenc` : un binaire ffmpeg
+statique [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (`linux64-gpl`,
+self-contained) remplace le paquet Debian dans l'image finale. `docker-compose.gpu.yml`
+positionne ce build arg automatiquement — il suffit de (re)construire avec les deux fichiers
+compose :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+Limitations à connaître :
+
+- La variante `nvenc` est disponible **uniquement en amd64** (BtbN ne publie pas de build
+  `linux64` pour arm64) — sans conséquence pratique puisque NVENC est une technologie NVIDIA.
+- Nécessite `nvidia-container-toolkit` sur l'hôte, et `NVIDIA_DRIVER_CAPABILITIES` incluant la
+  capability `video` (déjà positionnée dans `docker-compose.gpu.yml`) pour exposer
+  `libnvidia-encode` à l'intérieur du conteneur.
+
+Détails d'implémentation : stages `ffmpeg-debian` / `ffmpeg-nvenc` de `server/Dockerfile`.
+
 ## Déroulement d'une conversion
 
 1. Le job a un `preset_id` différent de `copy` (ou absent avec un défaut différent de `copy` si

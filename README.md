@@ -114,6 +114,18 @@ services:
 docker compose up -d
 ```
 
+**NVIDIA NVENC:** GPU passthrough alone isn't enough — the default server image ships the
+Debian-packaged ffmpeg, which doesn't include NVENC (Debian repos exclude the required non-free
+dependencies). Use the bundled [`docker-compose.gpu.yml`](docker-compose.gpu.yml) override, which
+also rebuilds the image with a static NVENC-enabled ffmpeg binary (amd64 only):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+See [`docs/en/modules/conversion.md`](docs/en/modules/conversion.md#nvenc-support-in-the-docker-image)
+for details.
+
 ### 2. Load the extension
 
 ```bash
