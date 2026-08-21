@@ -92,8 +92,28 @@ def test_resolve_destination_rejects_missing_root(tmp_path) -> None:
         resolve_destination(str(root), "movie.mp4", roots)
 
     message = str(excinfo.value)
-    assert "n'existe pas" in message
-    assert str(root) in message  # message actionnable : le chemin fautif est nommé
+    assert "Downloads" in message  # le client sait quelle racine est en cause
+    assert "n'est pas montée" in message
+
+
+def test_client_error_message_leaks_no_infrastructure_detail(tmp_path) -> None:
+    """Le message rendu au client ne doit citer ni l'uid du process ni la topologie de
+    montage : ces détails restent dans le message opérateur (logs)."""
+    root = tmp_path / "not-mounted"
+    roots = [DownloadRoot(label="Downloads", path=root)]
+
+    with pytest.raises(RootUnavailableError) as excinfo:
+        resolve_destination(str(root), "movie.mp4", roots)
+
+    client_message = str(excinfo.value)
+    assert str(root) not in client_message
+    assert "uid" not in client_message
+    assert "docker-compose" not in client_message
+    # Le message opérateur, lui, reste actionnable.
+    operator_message = root_issue(roots[0])
+    assert operator_message is not None
+    assert str(root) in operator_message
+    assert "EZDL_DOWNLOAD_ROOTS" in operator_message
 
 
 @skip_if_root
@@ -110,6 +130,20 @@ def test_resolve_destination_rejects_readonly_root(tmp_path) -> None:
         root.chmod(0o700)
 
     assert "écriture" in str(excinfo.value)
+
+
+def test_resolve_folder_rejects_tilde_path_without_crashing(tmp_path) -> None:
+    """`~utilisateur-inconnu` lève `RuntimeError` dans `expanduser()` (donc un 500) : le
+    chemin doit être refusé comme non absolu, sans expansion."""
+    root = tmp_path / "downloads"
+    root.mkdir()
+    roots = [DownloadRoot(label="Downloads", path=root)]
+
+    with pytest.raises(PathSecurityError):
+        resolve_destination("~nosuchuser42/loot", "movie.mp4", roots)
+
+    with pytest.raises(PathSecurityError):
+        resolve_destination("~/loot", "movie.mp4", roots)
 
 
 def test_root_issue_none_when_root_is_usable(tmp_path) -> None:

@@ -219,6 +219,37 @@ async def test_run_job_never_overwrites_an_existing_file(job_queue, monkeypatch)
         assert persisted.size == len(b"nouveau")
 
 
+async def test_run_job_errors_when_root_vanishes_during_download(job_queue, monkeypatch) -> None:
+    """Volume démonté pendant le téléchargement : le job échoue au lieu de recréer
+    l'arborescence sur la couche locale et d'annoncer un `done` trompeur."""
+    queue, engine, settings = job_queue
+    job_id = _create_job(engine, settings)
+    root = settings.roots[0].path
+
+    async def fake_start_download(url: str, output_template: Path, **kwargs: object):
+        work_dir = Path(output_template).parent
+        work_dir.mkdir(parents=True, exist_ok=True)
+        (work_dir / "download.mp4").write_bytes(b"contenu")
+        root.rmdir()  # la racine disparaît après la création du job
+        return SimpleNamespace(stdout=None, stderr=None, returncode=0, kill=lambda: None)
+
+    async def noop(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(ytdlp, "start_download", fake_start_download)
+    monkeypatch.setattr(ytdlp, "stream_progress", noop)
+    monkeypatch.setattr(ytdlp, "wait_download", noop)
+
+    await queue._run_job(job_id)
+
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.ERROR.value
+        assert persisted.error is not None and "Downloads" in persisted.error
+    assert not root.exists()  # rien n'a été recréé sous la racine démontée
+
+
 async def test_run_job_reports_error_when_ytdlp_produced_nothing(job_queue, monkeypatch) -> None:
     """Sortie vide malgré un code retour 0 : le job passe en erreur explicite, pas en `done`."""
     queue, engine, settings = job_queue

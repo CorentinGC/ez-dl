@@ -48,11 +48,14 @@ def _under_root(candidate: Path, root: DownloadRoot) -> bool:
 
 
 def root_issue(root: DownloadRoot) -> str | None:
-    """Décrit pourquoi une racine est inutilisable, ou `None` si elle est prête à l'emploi.
+    """Cause d'indisponibilité d'une racine **à destination de l'opérateur** (logs), ou `None`.
 
     La validation de chemin est lexicale : elle ne dit rien de l'état réel du disque. Une
     racine déclarée mais non montée (ou montée en lecture seule / avec un autre uid) doit
     être détectée ici, sinon l'échec n'arrive qu'au déplacement final, téléchargement fait.
+
+    Ce message cite l'uid du process et le fichier de montage à corriger : il va dans les
+    logs serveur, jamais dans une réponse HTTP (voir `_client_issue`).
     """
     path = root.path
     if not path.exists():
@@ -70,33 +73,54 @@ def root_issue(root: DownloadRoot) -> str | None:
     return None
 
 
+def _client_issue(root: DownloadRoot) -> str:
+    """Message d'indisponibilité destiné au client : ce qu'il doit savoir, rien de plus.
+
+    L'uid d'exécution et la topologie de montage n'ont aucune utilité côté client et
+    renseignent gratuitement sur l'infrastructure — ils restent dans les logs serveur.
+    """
+    return (
+        f"Destination indisponible : la racine « {root.label} » n'est pas montée ou n'est pas "
+        "accessible en écriture côté serveur. Voir les logs du serveur pour le détail."
+    )
+
+
 def unavailable_roots(roots: list[DownloadRoot]) -> list[tuple[DownloadRoot, str]]:
     """Liste les racines inutilisables avec leur cause (pour l'avertissement de démarrage)."""
     issues = ((root, root_issue(root)) for root in roots)
     return [(root, issue) for root, issue in issues if issue is not None]
 
 
+def _available_root(resolved: Path, roots: list[DownloadRoot]) -> DownloadRoot:
+    """Retourne la racine autorisée ET utilisable qui contient `resolved`, ou lève."""
+    root = next((root for root in roots if _under_root(resolved, root)), None)
+    if root is None:
+        raise PathSecurityError(f"Le dossier {str(resolved)!r} n'est sous aucune racine autorisée")
+    if root_issue(root) is not None:
+        raise RootUnavailableError(_client_issue(root))
+    return root
+
+
 def resolve_folder(folder: str, roots: list[DownloadRoot]) -> Path:
     """Résout un chemin de dossier et vérifie qu'il est sous une racine autorisée ET utilisable."""
-    candidate = Path(folder).expanduser()
+    # Pas de `expanduser()` : le contrat exige un chemin absolu, `~` ne peut désigner qu'un
+    # home du process (jamais une racine légitime), et il lève `RuntimeError` — donc un 500 —
+    # sur un `~utilisateur` inconnu, cas courant sous un uid Docker sans entrée /etc/passwd.
+    candidate = Path(folder)
     if not candidate.is_absolute():
         raise PathSecurityError(f"Chemin de dossier invalide (doit être absolu) : {folder!r}")
     resolved = candidate.resolve()
-    root = next((root for root in roots if _under_root(resolved, root)), None)
-    if root is None:
-        raise PathSecurityError(f"Le dossier {folder!r} n'est sous aucune racine autorisée")
-    issue = root_issue(root)
-    if issue is not None:
-        raise RootUnavailableError(f"Destination indisponible : {issue}")
+    _available_root(resolved, roots)
     return resolved
 
 
 def resolve_destination(folder: str, filename: str, roots: list[DownloadRoot]) -> Path:
     """Résout `folder/filename` (nom sanitizé) et vérifie qu'il reste sous une racine
-    autorisée. Lève `PathSecurityError` sinon (à convertir en 400 côté API)."""
+    autorisée ET utilisable. Lève `PathSecurityError` sinon (à convertir en 400 côté API)."""
     safe_name = sanitize_filename(filename)
     folder_path = resolve_folder(folder, roots)
     destination = (folder_path / safe_name).resolve()
-    if any(_under_root(destination, root) for root in roots):
-        return destination
-    raise PathSecurityError(f"Destination hors des racines autorisées : {destination}")
+    # Même contrôle que sur le dossier : un lien symbolique pourrait faire sortir la
+    # destination de la racine validée, ou la faire retomber sur une racine indisponible.
+    _available_root(destination, roots)
+    return destination

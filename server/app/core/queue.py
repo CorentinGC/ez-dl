@@ -97,10 +97,15 @@ def _downloaded_file(work_dir: Path) -> Path:
     réellement produit (un merge/remux peut la changer). On prend donc le plus gros
     fichier restant, hors résidus.
     """
+    # `is_file()` suit les liens : un symlink serait sélectionné puis déplacé tel quel vers
+    # la destination, où il pointerait hors des racines autorisées. yt-dlp n'en crée pas —
+    # c'est de la défense en profondeur.
     candidates = [
         path
         for path in work_dir.iterdir()
-        if path.is_file() and not path.suffix.startswith(_LEFTOVER_SUFFIXES)
+        if path.is_file()
+        and not path.is_symlink()
+        and not path.suffix.startswith(_LEFTOVER_SUFFIXES)
     ]
     if not candidates:
         raise RuntimeError("yt-dlp n'a produit aucun fichier")
@@ -238,12 +243,7 @@ class JobQueue:
                 self._update_job(session, job, status=JobStatus.CANCELED)
                 return
 
-            try:
-                destination = resolve_destination(
-                    job.folder, job.filename or job.url, self._settings.roots
-                )
-            except PathSecurityError as exc:
-                self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
+            if self._destination_or_error(session, job) is None:
                 return
 
             # Dossier de travail dédié : yt-dlp choisit lui-même le nom final du fichier,
@@ -256,7 +256,7 @@ class JobQueue:
                 source = await self._convert_phase(session, job, temp_path, work_dir)
                 if source is None:
                     return
-                self._move_phase(session, job, source, destination)
+                self._move_phase(session, job, source)
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -333,13 +333,30 @@ class JobQueue:
         temp_path.unlink(missing_ok=True)
         return converted_path
 
-    def _move_phase(self, session: Session, job: Job, source: Path, destination: Path) -> None:
+    def _destination_or_error(self, session: Session, job: Job) -> Path | None:
+        """Résout la destination du job, ou passe le job en erreur et retourne `None`."""
+        try:
+            return resolve_destination(
+                job.folder, job.filename or job.url, self._settings.roots
+            )
+        except PathSecurityError as exc:
+            self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
+            return None
+
+    def _move_phase(self, session: Session, job: Job, source: Path) -> None:
         """Étape finale : déplacement atomique vers la destination, puis statut `done`.
+
+        La destination est **re-résolue ici** : un volume démonté entre la création du job
+        et la fin du téléchargement ferait sinon recréer l'arborescence sur la couche
+        inscriptible du conteneur, avec un job `done` alors que rien n'a atteint le NAS.
 
         `size` est recalculé sur le fichier final (taille réelle après conversion
         éventuelle), plutôt que de conserver la dernière estimation de téléchargement.
         """
         self._update_job(session, job, status=JobStatus.MOVING)
+        destination = self._destination_or_error(session, job)
+        if destination is None:
+            return
         try:
             final_path = _free_destination(destination)
             _atomic_move(source, final_path)

@@ -106,6 +106,12 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **Binaire yt-dlp du Dockerfile par TARGETARCH** : `yt-dlp_linux` (amd64) vs
   `yt-dlp_linux_aarch64` (arm64). Un asset x86_64 codé en dur casse sur Apple Silicon avec
   « rosetta error: failed to open elf » au premier job.
+- **Message opérateur ≠ message client** (`ez-dl-0tk`) : `root_issue()` (logs) cite l'uid du
+  process et le fichier de montage à corriger ; `_client_issue()` (réponses HTTP, `Job.error`)
+  ne cite que le label de la racine. Un message d'erreur rendu au client est du contenu public.
+- **Jamais de `Path.expanduser()` sur une entrée utilisateur** : lève `RuntimeError` (donc 500)
+  sur `~utilisateur-inconnu`, cas courant sous un uid Docker sans entrée `/etc/passwd`. Le
+  contrat exige déjà un chemin absolu, l'expansion n'a aucune raison d'exister.
 - **Routes FastAPI qui touchent le disque : `def`, pas `async def`** — `stat`/`statvfs`/`scandir`
   sur un montage NAS mort partent en sommeil ininterruptible et figeraient toute la boucle
   asyncio (health, SSE, jobs en cours). En fonction synchrone, Starlette les exécute en

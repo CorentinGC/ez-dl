@@ -42,8 +42,24 @@ def parse_download_roots(raw: str) -> list[DownloadRoot]:
         path_str = path_str.strip()
         if not label or not path_str:
             raise ValueError(f"Format de racine invalide (attendu Label=/chemin) : {chunk!r}")
-        roots.append(DownloadRoot(label=label, path=Path(path_str)))
+        roots.append(DownloadRoot(label=label, path=_validated_root_path(path_str, chunk)))
     return roots
+
+
+def _validated_root_path(path_str: str, chunk: str) -> Path:
+    """Valide le chemin d'une racine : absolu et différent de `/`.
+
+    Toute la sécurité des chemins repose sur l'appartenance à une racine : une racine `/`
+    rendrait le système de fichiers entier inscriptible, et une racine relative serait
+    résolue contre le répertoire de lancement du process. Les deux doivent échouer au
+    démarrage plutôt que produire une validation vide de sens.
+    """
+    path = Path(path_str)
+    if not path.is_absolute():
+        raise ValueError(f"Racine de téléchargement non absolue : {chunk!r}")
+    if path == Path("/"):
+        raise ValueError("Racine de téléchargement interdite : `/` autoriserait tout le disque")
+    return path
 
 
 def _origin_to_regex(pattern: str) -> str:

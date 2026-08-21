@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, ensure_password
+from app.config import Settings, ensure_password, parse_download_roots
 
 
 def test_blank_password_is_normalized_to_empty() -> None:
@@ -69,3 +69,21 @@ def test_relative_dir_error_never_leaks_the_password() -> None:
 
     assert "hunter2-secret" not in str(exc_info.value)
     assert "hunter2" not in repr(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["All=/", "Relative=media", "Trailing=./downloads"],
+)
+def test_rejects_dangerous_download_roots(raw: str) -> None:
+    """Toute la sécurité des chemins repose sur l'appartenance à une racine : `/` rendrait
+    le disque entier inscriptible et un chemin relatif dépendrait du cwd du process."""
+    with pytest.raises(ValueError):
+        parse_download_roots(raw)
+
+
+def test_accepts_absolute_download_roots(tmp_path: Path) -> None:
+    roots = parse_download_roots(f"Movies={tmp_path},Series={tmp_path / 'tv'}")
+
+    assert [r.label for r in roots] == ["Movies", "Series"]
+    assert roots[0].path == tmp_path

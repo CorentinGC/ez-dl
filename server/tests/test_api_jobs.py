@@ -38,7 +38,9 @@ def test_create_job_unmounted_root_returns_400_before_downloading(
     )
 
     assert response.status_code == 400
-    assert "n'existe pas" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "Downloads" in detail and "n'est pas montée" in detail
+    assert "uid" not in detail  # le détail d'infrastructure reste dans les logs serveur
     # Aucun job n'a été créé : rien à nettoyer côté historique.
     assert client_no_worker.get("/api/jobs", headers=AUTH).json() == []
 
