@@ -209,3 +209,39 @@ def test_delete_purges_the_work_directory_of_a_paused_job(
 
     assert not work_dir.exists()
     assert client_no_worker.get(f"/api/jobs/{job_id}", headers=AUTH).status_code == 404
+
+
+def test_create_job_rejects_option_like_format_id(client_no_worker, download_root) -> None:
+    """`format_id` finit en argument de `-f` : une valeur en `-` serait lue par yt-dlp comme
+    une option et produirait une erreur opaque. Refus au schéma (ez-dl-b6e)."""
+    response = client_no_worker.post(
+        "/api/jobs",
+        json={
+            "url": "https://example.com/video",
+            "folder": str(download_root),
+            "filename": "video.mp4",
+            "format_id": "--exec=touch /tmp/pwned",
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_job_persists_the_requested_format_id(client_no_worker, download_root) -> None:
+    """Le `format_id` choisi dans la popup doit survivre jusqu'au job : c'est lui qui
+    alimente `build_format_selector` au téléchargement."""
+    response = client_no_worker.post(
+        "/api/jobs",
+        json={
+            "url": "https://example.com/video",
+            "folder": str(download_root),
+            "filename": "video.mp4",
+            "format_id": "137",
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 201
+    detail = client_no_worker.get(f"/api/jobs/{response.json()['job_id']}", headers=AUTH)
+    assert detail.json()["format_id"] == "137"

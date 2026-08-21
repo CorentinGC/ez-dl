@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.ytdlp import normalize_formats, suggested_filename
+from app.core.ytdlp import build_format_selector, normalize_formats, suggested_filename
 
 SAMPLE_INFO = {
     "title": "Ma Vidéo Test",
@@ -47,16 +47,64 @@ SAMPLE_INFO = {
             "acodec": "none",
             "filesize": 120_000_000,
         },
+        # Planche de vignettes : ni audio ni vidéo, n'a rien à faire dans un choix de qualité.
+        {
+            "format_id": "sb0",
+            "ext": "mhtml",
+            "protocol": "mhtml",
+            "height": 180,
+            "width": 320,
+            "vcodec": "none",
+            "acodec": "none",
+        },
+        # Format réservé aux comptes YouTube Premium : échoue en « Requested format is not
+        # available » sans compte authentifié (ez-dl-b6e).
+        {
+            "format_id": "616",
+            "ext": "mp4",
+            "format_note": "Premium",
+            "height": 1080,
+            "width": 1920,
+            "fps": 25,
+            "vcodec": "vp09.00.40.08",
+            "acodec": "none",
+            "tbr": 5784.0,
+        },
     ],
 }
 
 
-def test_normalize_formats_prefers_combined_audio_video_as_best() -> None:
-    """Un format déjà combiné (audio+vidéo) doit être préféré à un flux vidéo seul,
-    même de résolution supérieure, pour rester lisible sans fusion ffmpeg."""
+def test_normalize_formats_prefers_highest_resolution_as_best() -> None:
+    """Le meilleur format est le plus haute qualité, même video-only : `build_format_selector`
+    lui adjoint l'audio. Préférer un muxé ferait élire un 720p devant un 1080p60."""
     formats, best_format_id = normalize_formats(SAMPLE_INFO)
-    assert best_format_id == "22"
-    assert formats[0]["format_id"] == "22"
+    assert best_format_id == "248"
+    assert formats[0]["format_id"] == "248"
+
+
+def test_normalize_formats_drops_storyboards_and_premium() -> None:
+    """Storyboards (mhtml) et formats « Premium » ne sont pas téléchargeables : ni listés,
+    ni élus meilleur format (ez-dl-b6e)."""
+    formats, best_format_id = normalize_formats(SAMPLE_INFO)
+    listed = {f["format_id"] for f in formats}
+    assert "sb0" not in listed
+    assert "616" not in listed
+    assert best_format_id not in ("sb0", "616")
+
+
+def test_normalize_formats_returns_none_when_nothing_is_downloadable() -> None:
+    """Extraction dégradée ne renvoyant que des storyboards : aucun format exploitable."""
+    formats, best_format_id = normalize_formats(
+        {"formats": [{"format_id": "sb0", "protocol": "mhtml", "vcodec": "none", "acodec": "none"}]}
+    )
+    assert formats == []
+    assert best_format_id is None
+
+
+def test_build_format_selector_adds_audio_and_fallbacks() -> None:
+    """Un identifiant nu produirait un fichier muet (YouTube est video-only au-delà de
+    360p) et échouerait si l'id a disparu depuis le probe."""
+    assert build_format_selector("137") == "137+bestaudio/137/bv*+ba/b"
 
 
 def test_normalize_formats_flags_audio_and_video_only() -> None:
@@ -128,3 +176,15 @@ def test_last_line_is_truncated() -> None:
     from app.core.ytdlp import _last_line
 
     assert len(_last_line(b"ERROR: " + b"x" * 5000)) == 500
+
+
+def test_last_line_prefers_the_error_line_over_a_trailing_hint() -> None:
+    """yt-dlp fait suivre son `ERROR:` de conseils : c'est la cause qui doit remonter à l'UI."""
+    from app.core.ytdlp import _last_line
+
+    stderr = (
+        b"ERROR: [youtube] abc123: Requested format is not available\n"
+        b"Install a JS runtime; see  https://github.com/yt-dlp/yt-dlp/wiki/EJS  for details\n"
+    )
+
+    assert _last_line(stderr).startswith("ERROR: [youtube] abc123: Requested format")

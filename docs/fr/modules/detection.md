@@ -23,6 +23,25 @@ Cette méthode fonctionne pour tout site couvert par un extracteur yt-dlp (liste
 maintenue en amont) ; elle échoue silencieusement (ou renvoie une erreur d'extraction) pour les
 sites non supportés.
 
+### Formats exposés et format recommandé
+
+`normalize_formats` (`server/app/core/ytdlp.py`) filtre la liste brute de yt-dlp avant de
+l'exposer :
+
+- les **storyboards** (`protocol: mhtml`, planches de vignettes sans piste audio ni vidéo) sont
+  retirés, ainsi que les formats **« Premium »** : ces variantes haut débit sont réservées de façon
+  inconstante aux comptes YouTube Premium et peuvent échouer avec « Requested format is not
+  available » — le gain de débit ne justifie pas ce risque sur le format proposé par défaut ;
+- le tri place les formats **vidéo** d'abord, par résolution puis fps puis débit. Un format
+  video-only n'est pas pénalisé : le sélecteur de téléchargement lui adjoint automatiquement la
+  meilleure piste audio (voir [architecture.md](../architecture.md#cycle-de-vie-dun-job)) ;
+- `best_format_id` est le premier de cette liste. Si le filtrage ne laisse rien, `/api/probe`
+  renvoie une erreur explicite plutôt qu'une liste vide.
+
+**YouTube exige un runtime JavaScript** (Deno, installé dans l'image Docker) : sans lui, yt-dlp ne
+résout pas les challenges du player, renvoie une liste de formats amputée — voire aucun format
+jouable — et `-J` échoue. `--ignore-no-formats-error` évite que cet échec devienne un 502 opaque.
+
 ## 2. Sniffing réseau (extension)
 
 `extension/entrypoints/background.ts` écoute `chrome.webRequest.onBeforeRequest` et

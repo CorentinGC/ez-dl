@@ -11,6 +11,7 @@
 | Docker + Docker Compose | dernière stable | Déploiement du serveur |
 | `yt-dlp` | binaire **standalone** (pas la version pip) | Téléchargement vidéo — voir [MEMORY.md](../../MEMORY.md) pour la raison |
 | `ffmpeg` / `ffprobe` | dernière stable | Conversion et probe des flux |
+| `deno` | dernière stable | Runtime JS requis par yt-dlp pour YouTube (fourni par l'image Docker) |
 | Google Chrome ou Chromium | dernière stable | Chargement de l'extension MV3 |
 
 ## Installation dev locale

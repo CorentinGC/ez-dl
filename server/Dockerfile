@@ -122,11 +122,25 @@ RUN case "${TARGETARCH}" in \
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${YTDLP_ASSET}" \
     && chmod 755 /usr/local/bin/yt-dlp
 
+# Runtime JavaScript requis par yt-dlp pour YouTube. Depuis la dépréciation EJS, sans
+# runtime JS l'extracteur ne résout plus les challenges du player : la liste de formats
+# revient amputée (aucun format muxé, apparition de formats « Premium » non téléchargeables)
+# et, quand il ne reste plus rien de jouable, `yt-dlp -J` sort en erreur avec
+# « Requested format is not available » — remonté en 502 par /api/probe (ez-dl-b6e).
+# Deno est le seul runtime activé par défaut par yt-dlp (aucun `--js-runtimes` à passer).
+# L'image `bin` officielle ne contient que le binaire statique et est publiée en amd64
+# comme en arm64 : pas de sélection par TARGETARCH à faire ici.
+COPY --from=denoland/deno:bin-2.9.5 /deno /usr/local/bin/deno
+
 # Utilisateur non-root dédié. Le binaire yt-dlp est chown vers cet utilisateur
 # (et non laissé root:root) car `-U` doit pouvoir se remplacer lui-même sur disque.
+# Deno exige un cache accessible en écriture : il vit sous le HOME de l'utilisateur, et
+# surtout pas dans EZDL_TEMP_DIR qui est monté en tmpfs (vidé à chaque redémarrage).
 RUN groupadd --gid "${PGID}" ezdl \
     && useradd --uid "${PUID}" --gid "${PGID}" --create-home --shell /usr/sbin/nologin ezdl \
-    && chown "${PUID}:${PGID}" /usr/local/bin/yt-dlp
+    && chown "${PUID}:${PGID}" /usr/local/bin/yt-dlp \
+    && mkdir -p /home/ezdl/.cache/deno \
+    && chown -R "${PUID}:${PGID}" /home/ezdl/.cache
 
 # Dossier de travail des téléchargements (EZDL_TEMP_DIR) + sous-dossier des cookie-jars.
 # Créés et attribués à l'utilisateur applicatif ICI parce qu'un volume nommé vide est
@@ -145,8 +159,12 @@ WORKDIR /app
 COPY --from=builder --chown=${PUID}:${PGID} /app/.venv /app/.venv
 COPY --chown=${PUID}:${PGID} . .
 
+# HOME/DENO_DIR explicites : Docker ne dérive pas toujours HOME de /etc/passwd quand USER
+# est positionné, et un Deno sans cache inscriptible fait échouer l'extraction YouTube.
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/ezdl \
+    DENO_DIR=/home/ezdl/.cache/deno
 
 # =============================================================================
 # Stage final-debian — ffmpeg via apt (comportement historique, variante par défaut)

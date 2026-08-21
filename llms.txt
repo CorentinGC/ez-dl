@@ -14,7 +14,8 @@
 - [ADR 0001 — Stack FastAPI + WXT](docs/fr/decisions/0001-stack-fastapi-wxt.md)
 - [ADR 0002 — Licence PolyForm Noncommercial](docs/fr/decisions/0002-licence-polyform-noncommercial.md)
 - [ADR 0003 — Auth par mot de passe](docs/fr/decisions/0003-auth-mot-de-passe.md)
-- [Module — Détection](docs/fr/modules/detection.md) : yt-dlp probe, sniffing réseau, règles apprises.
+- [Module — Détection](docs/fr/modules/detection.md) : yt-dlp probe, filtrage/tri des formats,
+  sniffing réseau, règles apprises.
 - [Module — Conversion](docs/fr/modules/conversion.md) : presets ffmpeg, détection des encodeurs.
 - [Module — Apprentissage](docs/fr/modules/apprentissage.md) : picker DOM, corrélation réseau,
   règles de site.

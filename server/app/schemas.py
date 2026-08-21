@@ -29,8 +29,22 @@ def _reject_control_chars(value: str) -> str:
     return value
 
 
+def _validate_format_id(value: str) -> str:
+    """Valide un identifiant de format yt-dlp avant qu'il ne devienne un argument de `-f`.
+
+    Pas de risque d'exécution (`create_subprocess_exec`, jamais de shell), mais une valeur
+    en `-...` serait interprétée par yt-dlp comme une option et produirait une erreur
+    opaque. Un identifiant réel reste court (`137`, `hls-3815`, `616`)."""
+    if _CONTROL_CHARS.search(value):
+        raise ValueError("Caractère de contrôle interdit dans format_id.")
+    if value.startswith("-"):
+        raise ValueError("format_id invalide : ne peut pas commencer par « - ».")
+    return value
+
+
 MediaUrl = Annotated[str, AfterValidator(_validate_media_url)]
 CookieField = Annotated[str, AfterValidator(_reject_control_chars)]
+FormatId = Annotated[str, Field(max_length=100), AfterValidator(_validate_format_id)]
 
 
 class CookieItem(BaseModel):
@@ -179,7 +193,7 @@ class JobCreate(BaseModel):
     """Corps de `POST /api/jobs`."""
 
     url: MediaUrl
-    format_id: str | None = None
+    format_id: FormatId | None = None
     folder: str
     filename: str | None = None
     preset_id: str | None = None

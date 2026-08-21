@@ -56,6 +56,12 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       `JobsView`, cookies relus pour la reprise si l'option est active. 120 tests Vitest,
       red-green vérifié par mutation.
 
+- [x] `ez-dl-b6e` : YouTube réparé — Deno dans l'image (runtime JS yt-dlp), sélecteur
+      `<id>+bestaudio/<id>/bv*+ba/b`, filtrage storyboard/Premium au probe,
+      `--ignore-no-formats-error` + erreur explicite si aucun format, validation de `format_id`.
+      Vérifié en réel : probe 200 (`best_format_id` 270 au lieu du Premium 616), job 1080p avec
+      piste audio opus, non-régression source sniffée x.com. 2026-08-21.
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.
@@ -164,6 +170,17 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
 - **`EZDL_DATA_DIR`/`EZDL_TEMP_DIR` sont des chemins DANS le conteneur** (`/config`,
   `/tmp/ez-dl`) : une valeur relative (`./test`) donnait un `PermissionError` opaque au démarrage.
   Depuis `ez-dl-3qz`, `Settings` rejette tout chemin relatif avec un message explicite (non commité).
+- **YouTube exige un runtime JS dans l'image** (Deno, `denoland/deno:bin`, multi-arch) : sans lui,
+  yt-dlp avertit « No supported JavaScript runtime could be found », ne résout pas les challenges
+  du player et peut ne renvoyer aucun format jouable — `yt-dlp -J` sort alors en erreur avec
+  « Requested format is not available », remonté en **502** par `/api/probe` (`ez-dl-b6e`).
+  Deno a besoin d'un cache inscriptible : `HOME=/home/ezdl` + `DENO_DIR=/home/ezdl/.cache/deno`,
+  jamais dans `EZDL_TEMP_DIR` (tmpfs).
+- **Ne jamais passer un `format_id` nu à `-f`** : sur YouTube tout format au-delà de 360p est
+  video-only (`-f 137` → fichier **muet**), et les identifiants varient d'une extraction à l'autre
+  (suffixes de langue `-0/-1`, formats `Premium` selon le client interrogé). `build_format_selector`
+  produit `<id>+bestaudio/<id>/bv*+ba/b` : fusion audio, repli si déjà muxé, repli global si l'id a
+  disparu depuis le probe. Storyboards (`mhtml`) et formats « Premium » sont filtrés du probe.
 - **Assets vidéo externes piégeux pour les e2e** : `commondatastorage.googleapis.com` refuse les
   UA non-navigateur (403 pour yt-dlp/curl), `media.w3.org` 403 par intermittence quand yt-dlp
   envoie un `Referer` étranger. Servir la vidéo de test en local (`python3 -m http.server`).

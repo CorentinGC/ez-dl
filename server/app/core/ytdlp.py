@@ -75,17 +75,36 @@ def _format_label(fmt: dict[str, Any]) -> str:
     return " · ".join(parts) if parts else str(fmt.get("format_id", "?"))
 
 
-def _quality_rank(fmt: dict[str, Any]) -> tuple[bool, bool, int, float, float]:
-    """Clé de tri décroissant : formats combinés d'abord, puis résolution/fps/bitrate."""
+def _quality_rank(fmt: dict[str, Any]) -> tuple[bool, int, float, float]:
+    """Clé de tri décroissant : formats vidéo d'abord, puis résolution/fps/bitrate.
+
+    Les formats video-only ne sont plus pénalisés : `build_format_selector` leur adjoint
+    automatiquement la meilleure piste audio. Privilégier un muxé ferait au contraire
+    élire un 360p combiné devant un 1080p sans audio (cas YouTube classique).
+    """
     has_video = fmt.get("vcodec") not in (None, "none")
-    has_audio = fmt.get("acodec") not in (None, "none")
     return (
-        has_video and has_audio,
         has_video,
         fmt.get("height") or 0,
         fmt.get("fps") or 0,
         fmt.get("tbr") or 0,
     )
+
+
+def _is_downloadable(fmt: dict[str, Any]) -> bool:
+    """Écarte les formats qui n'ont rien à faire dans un choix de qualité utilisateur.
+
+    - Storyboards (`mhtml`) : planches de vignettes, ni audio ni vidéo.
+    - Formats « Premium » : variantes haut débit dont YouTube réserve l'accès aux comptes
+      Premium de façon inconstante (parfois servies à tous, parfois refusées avec
+      « Requested format is not available »). Le gain de débit ne vaut pas ce risque sur le
+      format proposé par défaut : on ne les expose pas (ez-dl-b6e).
+    """
+    if fmt.get("protocol") == "mhtml":
+        return False
+    if "Premium" in (fmt.get("format_note") or ""):
+        return False
+    return fmt.get("vcodec") not in (None, "none") or fmt.get("acodec") not in (None, "none")
 
 
 def normalize_formats(info: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
@@ -94,7 +113,7 @@ def normalize_formats(info: dict[str, Any]) -> tuple[list[dict[str, Any]], str |
     normalized: list[dict[str, Any]] = []
     for fmt in info.get("formats") or []:
         format_id = fmt.get("format_id")
-        if not format_id:
+        if not format_id or not _is_downloadable(fmt):
             continue
         normalized.append(
             {
@@ -140,10 +159,14 @@ async def probe(
     (`formats`, `best_format_id`, `suggested_filename` inclus)."""
     # `--` sépare les options des arguments positionnels : sans lui, une URL commençant par
     # `-` serait parsée par yt-dlp comme une option (`--exec`, `--paths`...).
+    # `--ignore-no-formats-error` : sans lui, une extraction dégradée (YouTube sans runtime
+    # JS, page géobloquée...) fait sortir `-J` en erreur sur le sélecteur par défaut plutôt
+    # que de rendre le JSON d'info. On préfère récupérer l'info et diagnostiquer nous-mêmes.
     args = [
         binary,
         "-J",
         "--no-warnings",
+        "--ignore-no-formats-error",
         *_context_args(cookies_file, headers, referer),
         "--",
         url,
@@ -162,10 +185,31 @@ async def probe(
         raise YtDlpError(f"yt-dlp a échoué : {_last_line(stderr)}")
     info: dict[str, Any] = json.loads(stdout.decode("utf-8", errors="replace"))
     formats, best_format_id = normalize_formats(info)
+    if not formats:
+        raise YtDlpError(
+            "Aucun format téléchargeable pour cette URL (contenu protégé, géobloqué, "
+            "ou extraction incomplète côté yt-dlp)."
+        )
     info["formats"] = formats
     info["best_format_id"] = best_format_id
     info["suggested_filename"] = suggested_filename(info)
     return info
+
+
+def build_format_selector(format_id: str) -> str:
+    """Construit le sélecteur `-f` à partir du `format_id` choisi par l'utilisateur.
+
+    Un identifiant nu ne convient pas : sur YouTube tout format au-delà de 360p est
+    **video-only**, et `-f 137` produirait un fichier muet. La chaîne de repli `/` de
+    yt-dlp couvre les trois cas dans un seul appel, dans l'ordre :
+
+    1. `<id>+bestaudio` — le format demandé fusionné avec la meilleure piste audio ;
+    2. `<id>` — le format demandé est déjà muxé (la fusion précédente n'a pas de sens) ;
+    3. `bv*+ba/b` — l'identifiant a disparu entre le probe et le téléchargement (les ids
+       YouTube varient d'une extraction à l'autre selon le client interrogé) : on retombe
+       sur le meilleur format disponible plutôt que d'échouer.
+    """
+    return f"{format_id}+bestaudio/{format_id}/bv*+ba/b"
 
 
 async def start_download(
@@ -200,8 +244,10 @@ async def start_download(
         "-o",
         str(output_template),
     ]
+    # Sans `format_id` (sources sniffées : la qualité est dans l'URL), pas de `-f` du tout :
+    # yt-dlp applique son propre défaut.
     if format_id:
-        args += ["-f", format_id]
+        args += ["-f", build_format_selector(format_id)]
     args += _context_args(cookies_file, headers, referer)
     # Voir `probe` : `--` empêche qu'une URL en `-...` soit interprétée comme une option.
     args += ["--", url]
@@ -246,8 +292,12 @@ _MAX_ERROR_LENGTH = 500
 
 
 def _last_line(raw: bytes) -> str:
-    """Retourne la dernière ligne non vide d'une sortie process (pour message d'erreur),
-    expurgée des lignes susceptibles de contenir des cookies et tronquée."""
+    """Retourne la ligne la plus informative d'une sortie process (pour message d'erreur),
+    expurgée des lignes susceptibles de contenir des cookies et tronquée.
+
+    yt-dlp fait souvent suivre son `ERROR:` d'une ligne de conseil (« Use --list-formats… »,
+    « Install… ») : c'est la ligne `ERROR:` qui porte la cause, on la privilégie.
+    """
     lines = [
         line
         for line in raw.decode("utf-8", errors="replace").strip().splitlines()
@@ -255,7 +305,8 @@ def _last_line(raw: bytes) -> str:
     ]
     if not lines:
         return "erreur inconnue"
-    return lines[-1][:_MAX_ERROR_LENGTH]
+    errors = [line for line in lines if line.lstrip().startswith("ERROR:")]
+    return (errors or lines)[-1][:_MAX_ERROR_LENGTH]
 
 
 async def update(binary: str = "yt-dlp", *, timeout: float = 120.0) -> str:
