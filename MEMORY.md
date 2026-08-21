@@ -67,6 +67,10 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       distingue Annuler (job actif) de Supprimer (job terminé, `done`/`error` compris, qui
       n'avaient aucun bouton). Pause/reprise/retry vérifiés en réel puis extension rebuildée.
       100 tests pytest + 124 Vitest. 2026-08-21.
+- [x] `ez-dl-f4z` : « Supprimer » désambiguïsé — `?delete_file=true` sur le `DELETE` (jobs `done`
+      uniquement) + modale de confirmation dans la popup (« Retirer de la liste » / « Retirer et
+      effacer le fichier »). Vérifié sur le conteneur : défaut non destructif, effacement réel,
+      409 sur un job en erreur, fichiers voisins intacts. 105 pytest + 129 Vitest. 2026-08-21.
 
 ## Décisions récentes (2026-08-21)
 
@@ -199,7 +203,12 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
 - **`DELETE /api/jobs/{id}` a deux sens** : annulation (job actif, la ligne reste en `canceled`,
   reprenable) ou suppression d'historique (job terminé). Le popup doit refléter les deux — retirer
   la ligne de façon optimiste après une annulation la fait réapparaître par SSE, ce qui donnait
-  l'impression que « Annuler » ne faisait rien.
+  l'impression que « Annuler » ne faisait rien. Le fichier téléchargé n'est **jamais** effacé par
+  défaut : il faut `?delete_file=true` (modale de confirmation côté popup, `ez-dl-f4z`).
+- **`delete_file` n'est accepté que sur un job `done`** (409 sinon) : c'est le seul statut où le
+  serveur a écrit ce chemin exact. Ailleurs `folder`/`filename` n'est qu'une destination *prévue*,
+  et un job échoué porte souvent le nom d'un job voisin abouti — l'effacer détruirait le fichier de
+  ce dernier. L'`unlink` repasse par `resolve_destination` et n'agit que sur un `is_file()`.
 - **Assets vidéo externes piégeux pour les e2e** : `commondatastorage.googleapis.com` refuse les
   UA non-navigateur (403 pour yt-dlp/curl), `media.w3.org` 403 par intermittence quand yt-dlp
   envoie un `Referer` étranger. Servir la vidéo de test en local (`python3 -m http.server`).

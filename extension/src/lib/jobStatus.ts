@@ -59,3 +59,17 @@ export function isResumable(job: Job): boolean {
 export function isRemovable(job: Job): boolean {
   return !isActive(job);
 }
+
+/**
+ * Le job a déposé un fichier à sa destination — donc « Supprimer » a deux sens distincts
+ * (retirer de la liste / effacer aussi le fichier) et mérite une confirmation.
+ *
+ * Seul `done` compte : un job échoué ou annulé n'a jamais écrit sa destination, et le serveur
+ * refuse (`409`) d'effacer un fichier pour lui.
+ *
+ * @param job - Job à tester.
+ * @returns `true` si un fichier téléchargé correspond à ce job.
+ */
+export function hasStoredFile(job: Job): boolean {
+  return job.status === 'done' && Boolean(job.filename);
+}

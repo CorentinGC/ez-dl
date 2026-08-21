@@ -4,16 +4,19 @@
  * la liste pour annoncer les mises à jour.
  */
 
+import { useState } from 'react';
 import { formatEta, formatProgress, formatSize, formatSpeed } from '@/src/lib/format';
-import { isActive, isPausable, isResumable } from '@/src/lib/jobStatus';
+import { hasStoredFile, isActive, isPausable, isResumable } from '@/src/lib/jobStatus';
 import type { Job, JobStatus } from '@/src/lib/types';
 import type { JobsConnectionMode } from '../hooks/useJobs';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface JobsViewProps {
   jobs: Job[];
   connectionMode: JobsConnectionMode;
   actionError: string | null;
-  onCancel: (job: Job) => void;
+  /** `deleteFile` : effacer aussi le fichier téléchargé (jobs terminés uniquement). */
+  onCancel: (job: Job, options?: { deleteFile?: boolean }) => void;
   onPause: (id: string) => void;
   onResume: (job: Job) => void;
 }
@@ -31,6 +34,10 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 };
 
 export function JobsView({ jobs, connectionMode, actionError, onCancel, onPause, onResume }: JobsViewProps) {
+  // Job dont la suppression attend une confirmation : « Supprimer » recouvre deux gestes très
+  // différents dès qu'un fichier existe sur le disque, l'utilisateur doit choisir lequel.
+  const [pendingRemoval, setPendingRemoval] = useState<Job | null>(null);
+
   if (jobs.length === 0) {
     return (
       <p className="loading-hint" role="status">
@@ -38,6 +45,22 @@ export function JobsView({ jobs, connectionMode, actionError, onCancel, onPause,
       </p>
     );
   }
+
+  const requestRemoval = (job: Job) => {
+    if (hasStoredFile(job)) {
+      setPendingRemoval(job);
+      return;
+    }
+    // Annulation d'un job en cours, ou job sans fichier déposé (erreur, annulé, suspendu) :
+    // rien de destructif à arbitrer, pas de modale.
+    onCancel(job);
+  };
+
+  const confirmRemoval = (deleteFile: boolean) => {
+    if (!pendingRemoval) return;
+    onCancel(pendingRemoval, { deleteFile });
+    setPendingRemoval(null);
+  };
 
   return (
     <div className="jobs-view">
@@ -52,13 +75,24 @@ export function JobsView({ jobs, connectionMode, actionError, onCancel, onPause,
           <li key={job.id}>
             <JobRow
               job={job}
-              onCancel={() => onCancel(job)}
+              onCancel={() => requestRemoval(job)}
               onPause={() => onPause(job.id)}
               onResume={() => onResume(job)}
             />
           </li>
         ))}
       </ul>
+      {pendingRemoval ? (
+        <ConfirmDialog
+          title="Supprimer ce téléchargement ?"
+          message={`« ${pendingRemoval.filename} » est déposé dans ${pendingRemoval.folder}.`}
+          actions={[
+            { label: 'Retirer de la liste', onSelect: () => confirmRemoval(false) },
+            { label: 'Retirer et effacer le fichier', tone: 'danger', onSelect: () => confirmRemoval(true) },
+          ]}
+          onDismiss={() => setPendingRemoval(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -78,7 +112,8 @@ function JobRow({
   const progressPct = job.progress !== null ? Math.round(Math.min(Math.max(job.progress, 0), 100)) : null;
   // Même route `DELETE`, deux actions distinctes : sur un job en cours elle **annule** le
   // téléchargement (la ligne reste, en « Annulé ») ; sur un job terminé elle le **retire**
-  // de l'historique. Tout job a donc toujours une sortie, y compris `done` et `error`.
+  // de l'historique — et, seulement si l'utilisateur le confirme dans la modale, efface aussi
+  // le fichier. Tout job a donc toujours une sortie, y compris `done` et `error`.
   const active = isActive(job);
   const pausable = isPausable(job);
   const resumable = isResumable(job);

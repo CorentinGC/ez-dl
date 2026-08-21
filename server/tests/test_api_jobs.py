@@ -245,3 +245,84 @@ def test_create_job_persists_the_requested_format_id(client_no_worker, download_
     assert response.status_code == 201
     detail = client_no_worker.get(f"/api/jobs/{response.json()['job_id']}", headers=AUTH)
     assert detail.json()["format_id"] == "137"
+def _create_done_job(client, download_root, filename: str = "video.mp4") -> str:
+    """Crée un job puis le force en `done`, comme après un déplacement réussi.
+
+    Le fichier de destination est écrit sur le disque : c'est lui que `delete_file` doit
+    effacer (ou épargner par défaut).
+    """
+    from app.models import JobStatus
+
+    job_id = _create_queued_job(client, download_root, filename=filename)
+    client.app.state.job_queue.update(job_id, status=JobStatus.DONE, progress=100.0)
+    (download_root / filename).write_bytes(b"contenu")
+    return job_id
+
+
+def test_delete_keeps_the_downloaded_file_by_default(client_no_worker, download_root) -> None:
+    """Comportement par défaut : « Supprimer » retire la ligne d'historique, pas le fichier.
+
+    C'est l'ambiguïté que la modale de la popup lève (ez-dl-f4z) — le défaut doit rester le
+    geste non destructif."""
+    job_id = _create_done_job(client_no_worker, download_root)
+
+    assert client_no_worker.delete(f"/api/jobs/{job_id}", headers=AUTH).status_code == 204
+
+    assert (download_root / "video.mp4").is_file()
+    assert client_no_worker.get(f"/api/jobs/{job_id}", headers=AUTH).status_code == 404
+
+
+def test_delete_with_delete_file_removes_the_downloaded_file(
+    client_no_worker, download_root
+) -> None:
+    job_id = _create_done_job(client_no_worker, download_root)
+
+    response = client_no_worker.delete(f"/api/jobs/{job_id}?delete_file=true", headers=AUTH)
+
+    assert response.status_code == 204
+    assert not (download_root / "video.mp4").exists()
+    assert client_no_worker.get(f"/api/jobs/{job_id}", headers=AUTH).status_code == 404
+
+
+def test_delete_with_delete_file_is_idempotent_when_the_file_is_gone(
+    client_no_worker, download_root
+) -> None:
+    """Fichier déplacé ou effacé à la main entre-temps : la ligne part quand même."""
+    job_id = _create_done_job(client_no_worker, download_root)
+    (download_root / "video.mp4").unlink()
+
+    response = client_no_worker.delete(f"/api/jobs/{job_id}?delete_file=true", headers=AUTH)
+
+    assert response.status_code == 204
+    assert client_no_worker.get(f"/api/jobs/{job_id}", headers=AUTH).status_code == 404
+
+
+def test_delete_file_is_refused_on_a_job_that_never_finished(
+    client_no_worker, download_root
+) -> None:
+    """Un job non terminé n'a pas écrit sa destination : `folder/filename` peut désigner le
+    fichier d'un job homonyme qui, lui, a réussi. Refus (409) plutôt qu'effacement à côté."""
+    survivor = _create_done_job(client_no_worker, download_root)
+    failed = _create_queued_job(client_no_worker, download_root, filename="video.mp4")
+
+    response = client_no_worker.delete(f"/api/jobs/{failed}?delete_file=true", headers=AUTH)
+
+    assert response.status_code == 409
+    assert (download_root / "video.mp4").is_file()
+    # Le job visé est intact : rien n'a été supprimé de l'historique non plus.
+    assert client_no_worker.get(f"/api/jobs/{failed}", headers=AUTH).status_code == 200
+    assert client_no_worker.get(f"/api/jobs/{survivor}", headers=AUTH).status_code == 200
+
+
+def test_delete_file_toward_an_unmounted_root_returns_400_and_keeps_the_job(
+    client_no_worker, download_root
+) -> None:
+    """Racine démontée : refuser plutôt que perdre la seule référence au fichier restant."""
+    job_id = _create_done_job(client_no_worker, download_root)
+    (download_root / "video.mp4").unlink()
+    download_root.rmdir()
+
+    response = client_no_worker.delete(f"/api/jobs/{job_id}?delete_file=true", headers=AUTH)
+
+    assert response.status_code == 400
+    assert client_no_worker.get(f"/api/jobs/{job_id}", headers=AUTH).status_code == 200

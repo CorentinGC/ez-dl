@@ -197,3 +197,45 @@ describe('parseJobFrame', () => {
     expect(parseJobFrame('event: job\ndata: {invalide')).toBeNull();
   });
 });
+
+describe('createApiClient().deleteJob', () => {
+  const config = { baseUrl: 'http://localhost:8000', password: 'secret' };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const noContent = () => new Response(null, { status: 204 });
+
+  it('n’ajoute pas delete_file par défaut : le fichier téléchargé est épargné', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(noContent());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).deleteJob('j1');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8000/api/jobs/j1');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('n’ajoute pas non plus delete_file quand l’option est explicitement fausse', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(noContent());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).deleteJob('j1', { deleteFile: false });
+
+    expect((fetchMock.mock.calls[0] as [string, RequestInit])[0]).toBe('http://localhost:8000/api/jobs/j1');
+  });
+
+  it('ajoute delete_file=true quand l’utilisateur choisit d’effacer le fichier', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(noContent());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).deleteJob('j1', { deleteFile: true });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8000/api/jobs/j1?delete_file=true');
+    expect(init.method).toBe('DELETE');
+    expect((init.headers as Headers).get('Authorization')).toBe('Bearer secret');
+  });
+});

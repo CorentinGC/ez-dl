@@ -254,4 +254,23 @@ actif, « Supprimer » ensuite (`src/lib/jobStatus.ts`, miroir des ensembles de 
 Il ne retire donc pas la ligne de la liste lors d'une annulation — c'est la mise à jour SSE qui la
 repasse en « Annulé ».
 
+**Le fichier téléchargé n'est jamais effacé par défaut** : `DELETE` ne touche qu'à la ligne
+d'historique et au dossier de travail temporaire. Pour effacer aussi le fichier déposé à la
+destination, le client passe `?delete_file=true`.
+
+Ce paramètre n'est accepté **que sur un job `done`** (`409` sinon) : c'est le seul statut pour
+lequel le serveur a lui-même écrit ce chemin exact. Sur les autres, `folder`/`filename` n'est
+qu'une destination *prévue* — un job échoué peut porter le même nom qu'un job voisin abouti, et
+l'effacer détruirait le fichier de ce dernier. Le chemin visé repasse par `resolve_destination`
+avant l'`unlink` (racine autorisée, racine montée, liens symboliques résolus), et seul un
+`is_file()` est supprimé : jamais un dossier. Un fichier déjà absent n'est pas une erreur — la
+suppression est idempotente. À l'inverse, un échec d'effacement (`400` racine indisponible, `500`
+permissions) **conserve le job dans la liste**, pour ne pas perdre la seule référence au fichier
+resté sur le disque.
+
+Côté popup, « Supprimer » sur un job terminé ouvre une modale de confirmation
+(`components/ConfirmDialog.tsx`) qui sépare explicitement les deux gestes : « Retirer de la liste »
+et « Retirer et effacer le fichier ». Les autres statuts n'ayant aucun fichier déposé, ils sont
+supprimés sans confirmation.
+
 Toute transition d'état déclenche une publication SSE sur `/api/jobs/events`.

@@ -20,7 +20,8 @@ export interface UseJobsResult {
   connectionMode: JobsConnectionMode;
   /** Dernière action de la liste ayant échoué (409, 400, serveur injoignable…), à afficher. */
   actionError: string | null;
-  cancelJob: (job: Job) => Promise<void>;
+  /** Annule (job en cours) ou retire de l'historique ; `deleteFile` efface aussi le fichier. */
+  cancelJob: (job: Job, options?: { deleteFile?: boolean }) => Promise<void>;
   pauseJob: (id: string) => Promise<void>;
   resumeJob: (job: Job) => Promise<void>;
 }
@@ -83,12 +84,12 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
 
   const applyJob = useCallback((job: Job) => setJobsById((prev) => new Map(prev).set(job.id, job)), []);
 
-  const cancelJob = useCallback(async (job: Job) => {
+  const cancelJob = useCallback(async (job: Job, options?: { deleteFile?: boolean }) => {
     const client = clientRef.current;
     if (!client) return;
     setActionError(null);
     try {
-      await client.deleteJob(job.id);
+      await client.deleteJob(job.id, options);
     } catch (error) {
       // Retirer la ligne alors que le serveur a refusé donnerait une liste mensongère.
       setActionError(actionMessage(error, 'Impossible de supprimer ce job.'));

@@ -124,3 +124,20 @@ def resolve_destination(folder: str, filename: str, roots: list[DownloadRoot]) -
     # destination de la racine validée, ou la faire retomber sur une racine indisponible.
     _available_root(destination, roots)
     return destination
+
+
+def remove_destination_file(folder: str, filename: str, roots: list[DownloadRoot]) -> bool:
+    """Supprime le fichier final d'un job terminé, après re-validation complète du chemin.
+
+    Le chemin n'est jamais reconstruit naïvement : il repasse par `resolve_destination`, donc
+    un dossier devenu hors racine (ou une racine démontée) lève au lieu d'effacer quoi que ce
+    soit. `is_file()` écarte les dossiers : cette fonction ne supprime jamais d'arborescence.
+
+    Retourne `False` si le fichier a déjà disparu — la suppression reste idempotente,
+    l'utilisateur a pu déplacer ou effacer le fichier lui-même entre-temps.
+    """
+    destination = resolve_destination(folder, filename, roots)
+    if not destination.is_file():
+        return False
+    destination.unlink(missing_ok=True)
+    return True

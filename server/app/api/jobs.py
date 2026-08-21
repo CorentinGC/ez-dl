@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlmodel import Session, select
 from sse_starlette.sse import EventSourceResponse
 
-from app.core.paths import PathSecurityError, resolve_destination, sanitize_filename
+from app.core.paths import (
+    PathSecurityError,
+    remove_destination_file,
+    resolve_destination,
+    sanitize_filename,
+)
 from app.core.queue import JobContext
 from app.db import get_session
 from app.models import Job, JobStatus
 from app.schemas import JobCreate, JobCreateResponse, JobOut, JobResume
 from app.security import require_auth
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jobs"], dependencies=[Depends(require_auth)])
 
@@ -156,11 +164,30 @@ async def resume_job(
 
 @router.delete("/jobs/{job_id}", status_code=204)
 async def delete_job(
-    job_id: str, request: Request, session: Session = Depends(get_session)
+    job_id: str,
+    request: Request,
+    delete_file: bool = Query(
+        default=False,
+        description="Effacer aussi le fichier téléchargé (jobs « done » uniquement).",
+    ),
+    session: Session = Depends(get_session),
 ) -> Response:
-    """Annule un job actif, ou le supprime de l'historique s'il est déjà terminé."""
+    """Annule un job actif, ou le supprime de l'historique s'il est déjà terminé.
+
+    Par défaut le fichier téléchargé n'est **pas** touché : seule la ligne d'historique (et le
+    dossier de travail temporaire) disparaît. `delete_file=true` efface en plus le fichier
+    final, et n'est accepté que sur un job `done` — c'est le seul statut pour lequel le
+    serveur a lui-même écrit ce chemin exact. Sur les autres, `folder`/`filename` ne sont
+    qu'une destination *prévue* : elle peut désigner le fichier d'un job voisin homonyme.
+    """
     queue = request.app.state.job_queue
     job = _job_or_404(session, job_id)
+
+    if delete_file and JobStatus(job.status) is not JobStatus.DONE:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Un job « {job.status} » n'a pas de fichier téléchargé à effacer.",
+        )
 
     if JobStatus(job.status) in _ACTIVE_STATUSES:
         queue.cancel(job_id)
@@ -170,10 +197,36 @@ async def delete_job(
             queue.update(job_id, status=JobStatus.CANCELED, speed=None, eta=None)
             queue.discard_work_dir(job_id)
     else:
+        if delete_file and job.filename:
+            _remove_downloaded_file(request, job)
         session.delete(job)
         session.commit()
         queue.discard_work_dir(job_id)
     return Response(status_code=204)
+
+
+def _remove_downloaded_file(request: Request, job: Job) -> None:
+    """Efface le fichier produit par un job terminé, avant de retirer sa ligne d'historique.
+
+    Le fichier part **avant** le `session.delete` : si la suppression échoue (racine démontée,
+    permissions), le job reste dans la liste et l'utilisateur peut réessayer, plutôt que de
+    perdre la seule référence au fichier resté sur le disque.
+    """
+    settings = request.app.state.settings
+    try:
+        removed = remove_destination_file(job.folder, job.filename or "", settings.roots)
+    except PathSecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        # Typiquement un volume monté en lecture seule ou un uid sans droit d'écriture : la
+        # cause précise va dans les logs de l'opérateur, pas dans la réponse HTTP.
+        logger.warning("Job %s : échec de la suppression du fichier — %s", job.id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Impossible d'effacer le fichier sur le serveur. Voir les logs du serveur.",
+        ) from exc
+    if not removed:
+        logger.info("Job %s : fichier déjà absent de la destination, rien à effacer.", job.id)
 
 
 def _job_or_404(session: Session, job_id: str) -> Job:

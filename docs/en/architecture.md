@@ -251,4 +251,22 @@ The popup mirrors that switch exactly: a single button reads "Annuler" while the
 "Supprimer" afterwards (`src/lib/jobStatus.ts`, mirroring the server's status sets). It therefore
 does not drop the row on cancellation — the SSE update is what flips it to "Annulé".
 
+**The downloaded file is never deleted by default**: `DELETE` only touches the history row and the
+temporary work directory. To also delete the file dropped at the destination, the client passes
+`?delete_file=true`.
+
+That parameter is only accepted **on a `done` job** (`409` otherwise): it is the only status for
+which the server itself wrote that exact path. On the others, `folder`/`filename` is merely an
+*intended* destination — a failed job can carry the same name as a neighbouring successful one, and
+deleting it would destroy that job's file. The targeted path goes back through
+`resolve_destination` before the `unlink` (allowed root, mounted root, symlinks resolved), and only
+an `is_file()` is removed: never a directory. An already-missing file is not an error — deletion is
+idempotent. Conversely, a failed deletion (`400` unavailable root, `500` permissions) **keeps the
+job in the list**, so the only reference to the file left on disk is not lost.
+
+In the popup, "Supprimer" on a finished job opens a confirmation dialog
+(`components/ConfirmDialog.tsx`) that separates the two gestures explicitly: "Retirer de la liste"
+and "Retirer et effacer le fichier". The other statuses have no file on disk, so they are removed
+without confirmation.
+
 Every state transition triggers an SSE publication on `/api/jobs/events`.

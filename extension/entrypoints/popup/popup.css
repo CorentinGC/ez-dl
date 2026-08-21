@@ -599,3 +599,58 @@ select {
   gap: 6px;
   margin-top: 6px;
 }
+
+/* Bouton d'action destructive (efface un fichier sur le disque) : contour rouge plutôt que
+   fond plein, pour qu'il ne devienne pas la cible la plus attirante de la modale. */
+.btn-danger {
+  border-color: var(--ez-danger);
+  color: var(--ez-danger);
+  background: var(--ez-bg);
+}
+
+.btn-danger:hover {
+  background: var(--ez-danger-bg);
+}
+
+/* Modale de confirmation */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.55);
+}
+
+.dialog {
+  width: 100%;
+  background: var(--ez-bg);
+  color: var(--ez-text);
+  border: 1px solid var(--ez-border);
+  border-radius: var(--ez-radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  padding: 16px;
+}
+
+.dialog-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.dialog-message {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--ez-text-muted);
+  /* Un nom de fichier long ne doit pas élargir la modale au-delà des 400 px de la popup. */
+  overflow-wrap: anywhere;
+}
+
+/* Actions empilées : les libellés (« Retirer et effacer le fichier ») ne tiennent pas côte
+   à côte sur 400 px, et un empilement rend le choix plus lisible qu'une rangée serrée. */
+.dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

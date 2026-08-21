@@ -243,7 +243,17 @@ export function createApiClient(config: ApiClientConfig) {
 
     getJob: (id: string) => request<Job>(config, `/api/jobs/${encodeURIComponent(id)}`),
 
-    deleteJob: (id: string) => request<void>(config, `/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /**
+     * Annule un job en cours, ou retire un job terminé de l'historique.
+     *
+     * `deleteFile` efface **en plus** le fichier téléchargé, et n'est accepté par le serveur
+     * que sur un job `done` (`409` sinon) : sur tout autre statut, `folder/filename` n'est
+     * qu'une destination prévue, qui peut désigner le fichier d'un job homonyme abouti.
+     */
+    deleteJob: (id: string, options?: { deleteFile?: boolean }) =>
+      request<void>(config, `/api/jobs/${encodeURIComponent(id)}${options?.deleteFile ? '?delete_file=true' : ''}`, {
+        method: 'DELETE',
+      }),
 
     /** Suspend un job en attente ou en cours ; `409` si son statut ne le permet pas. */
     pauseJob: (id: string) => request<Job>(config, `/api/jobs/${encodeURIComponent(id)}/pause`, { method: 'POST' }),

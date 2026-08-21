@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isActive, isPausable, isRemovable, isResumable } from './jobStatus';
+import { hasStoredFile, isActive, isPausable, isRemovable, isResumable } from './jobStatus';
 import type { Job, JobStatus } from './types';
 
 function jobWith(status: JobStatus): Job {
@@ -52,6 +52,20 @@ describe('groupes de statuts', () => {
     expect(isPausable(jobWith('queued'))).toBe(true);
     expect(isPausable(jobWith('converting'))).toBe(false);
     expect(isPausable(jobWith('paused'))).toBe(false);
+  });
+
+  it('ne reconnaît un fichier déposé que sur un job terminé', () => {
+    // Le serveur refuse (409) d'effacer le fichier d'un job non terminé : proposer le choix
+    // ailleurs que sur `done` mènerait à une modale dont une option échoue toujours.
+    expect(hasStoredFile(jobWith('done'))).toBe(true);
+    for (const status of ['error', 'canceled', 'paused', 'downloading'] as JobStatus[]) {
+      expect(hasStoredFile(jobWith(status))).toBe(false);
+    }
+  });
+
+  it('ne propose pas d’effacer un fichier quand le nom de fichier est vide', () => {
+    // `JobOut.filename` est optionnel côté serveur : sans nom, il n'y a pas de chemin à viser.
+    expect(hasStoredFile({ ...jobWith('done'), filename: '' })).toBe(false);
   });
 
   it('autorise la reprise après pause comme le retry après échec ou annulation', () => {
