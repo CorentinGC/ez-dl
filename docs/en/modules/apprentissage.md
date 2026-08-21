@@ -48,15 +48,38 @@ The popup displays the candidate URL resulting from the correlation. The user ca
 - if the URL format is reusable for other videos on the same site (a generic pattern identified,
   e.g. a `/hls/{id}/index.m3u8` path), save a **site rule**.
 
+### Automatic pattern generalization
+
+Memorizing the exact URL would be useless as soon as the next video loads: CDNs almost always
+encode a variable identifier (numeric id, hash, UUID, token) in the path or query string. Before
+saving, `generalizeUrlPattern` (`extension/src/lib/detection.ts`) reduces these variable
+identifiers to `*` wildcards, while keeping the scheme, host, and stable path structure:
+
+- a **fully variable path segment** (numeric id ≥ 2 digits, hexadecimal hash ≥ 8 characters, UUID,
+  random token ≥ 16 characters) becomes `*`;
+- a **mixed segment** (literal prefix/suffix around an identifier, e.g. `video-12345.mp4`) only
+  generalizes the variable part and keeps the rest, including the file extension
+  (`video-*.mp4`);
+- in the **query string**, keys are kept and every value is replaced with `*`
+  (`?id=12345&token=abc…` → `?id=*&token=*`);
+- the **fragment** (`#...`) is dropped: it is never sent by the browser to the server, so it is
+  meaningless in a network-matching pattern;
+- an invalid URL is returned unchanged, with no generalization attempted.
+
+The generalized pattern is what's shown in the picker banner (not the raw URL): the user sees
+exactly what will be saved before confirming. It always matches the source URL it was derived
+from via `patternToRegExp` (see [modules/detection.md](detection.md)).
+
 ## 4. Saving the rule (`POST /api/rules`)
 
 ```json
-{"domain": "example.com", "url_pattern": "*/hls/*.m3u8", "label": "Main player", "notes": "Detected via DOM picker on 2026-08-21", "source": "learned"}
+{"domain": "example.com", "url_pattern": "*/hls/*/index.m3u8", "label": "Main player", "notes": "Detected via DOM picker on 2026-08-21", "source": "learned"}
 ```
 
 `url_pattern` is a **simple glob/regex** (see
 [architecture.md](../architecture.md#data-model)) applied by the sniffer to future network
-requests detected on `domain`. `source: "learned"` distinguishes these rules from manually added
+requests detected on `domain` — it is the pattern already generalized by `generalizeUrlPattern`
+above, not the raw observed URL. `source: "learned"` distinguishes these rules from manually added
 rules (`source: "manual"`, e.g. via a future advanced options page) in `GET /api/rules`.
 
 ## 5. Reuse

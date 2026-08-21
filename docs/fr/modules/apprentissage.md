@@ -48,14 +48,37 @@ Le popup affiche l'URL candidate résultant de la corrélation. L'utilisateur pe
 - si le format d'URL est réutilisable pour d'autres vidéos du même site (motif générique repéré,
   ex. un chemin `/hls/{id}/index.m3u8`), enregistrer une **règle de site**.
 
+### Généralisation automatique du pattern
+
+Mémoriser l'URL exacte serait inutile dès la vidéo suivante : les CDN encodent quasi systématiquement
+un identifiant variable (id numérique, hash, UUID, token) dans le chemin ou la query string. Avant
+l'enregistrement, `generalizeUrlPattern` (`extension/src/lib/detection.ts`) réduit ces identifiants
+variables à des jokers `*`, tout en conservant le schéma, l'hôte et la structure stable du chemin :
+
+- un **segment de chemin entièrement variable** (id numérique ≥ 2 chiffres, hash hexadécimal ≥ 8
+  caractères, UUID, token aléatoire ≥ 16 caractères) devient `*` ;
+- un **segment mixte** (préfixe/suffixe littéral autour d'un identifiant, ex. `video-12345.mp4`)
+  ne généralise que la partie variable et conserve le reste, y compris l'extension de fichier
+  (`video-*.mp4`) ;
+- dans la **query string**, les clés sont conservées et toutes les valeurs remplacées par `*`
+  (`?id=12345&token=abc…` → `?id=*&token=*`) ;
+- le **fragment** (`#...`) est supprimé : jamais envoyé par le navigateur au serveur, donc sans
+  intérêt dans un pattern de matching réseau ;
+- une URL invalide est renvoyée telle quelle, sans tentative de généralisation.
+
+Le pattern généralisé est celui affiché dans la bannière du picker (pas l'URL brute) : l'utilisateur
+voit exactement ce qui sera mémorisé avant de confirmer. Il matche toujours l'URL d'origine dont il
+est dérivé via `patternToRegExp` (voir [modules/detection.md](detection.md)).
+
 ## 4. Enregistrement de la règle (`POST /api/rules`)
 
 ```json
-{"domain": "example.com", "url_pattern": "*/hls/*.m3u8", "label": "Lecteur principal", "notes": "Détecté via picker DOM le 2026-08-21", "source": "learned"}
+{"domain": "example.com", "url_pattern": "*/hls/*/index.m3u8", "label": "Lecteur principal", "notes": "Détecté via picker DOM le 2026-08-21", "source": "learned"}
 ```
 
 `url_pattern` est un **glob/regex simple** (voir [architecture.md](../architecture.md#modèle-de-données))
-appliqué par le sniffer aux futures requêtes réseau détectées sur `domain`. `source: "learned"`
+appliqué par le sniffer aux futures requêtes réseau détectées sur `domain` — c'est le pattern déjà
+généralisé par `generalizeUrlPattern` ci-dessus, pas l'URL brute observée. `source: "learned"`
 distingue ces règles des règles ajoutées manuellement (`source: "manual"`, ex. via une future page
 d'options avancée) dans `GET /api/rules`.
 

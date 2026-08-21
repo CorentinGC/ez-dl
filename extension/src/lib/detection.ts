@@ -143,9 +143,14 @@ export function dedupeCandidates(candidates: MediaCandidate[]): MediaCandidate[]
  * Heuristique : la présence de métacaractères regex typiques (hors `*`) fait traiter le
  * pattern comme une regex brute ; sinon c'est un glob simple où seul `*` est un joker
  * (zéro ou plusieurs caractères), le reste étant échappé littéralement.
+ *
+ * `?` est volontairement exclu du déclencheur "regex brute" : dans un `url_pattern` (généré
+ * notamment par `generalizeUrlPattern`), `?` n'est quasiment jamais un quantificateur regex
+ * voulu, mais le séparateur littéral de la query string d'une URL — il est donc toujours
+ * échappé dans la branche glob plutôt que de faire basculer tout le pattern en regex brute.
  */
 export function patternToRegExp(pattern: string): RegExp {
-  const looksLikeRegex = /[\\^$+?(){}|[\]]/.test(pattern);
+  const looksLikeRegex = /[\\^$+(){}|[\]]/.test(pattern);
   if (looksLikeRegex) {
     try {
       return new RegExp(pattern);
@@ -153,8 +158,81 @@ export function patternToRegExp(pattern: string): RegExp {
       // Regex invalide fournie par l'utilisateur : on retombe sur l'interprétation glob.
     }
   }
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, '\\$&').replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`);
+}
+
+// ---------------------------------------------------------------------------
+// Généralisation de pattern (mode apprentissage)
+// ---------------------------------------------------------------------------
+
+/**
+ * Segments d'identifiant variable à généraliser en `*`, du plus spécifique au plus générique
+ * (l'alternance regex essaie chaque variante à une position donnée dans cet ordre) :
+ * UUID, run hexadécimal (≥ 8 caractères), token alphanumérique/`-`/`_` (≥ 16 caractères, couvre
+ * les tokens base64url et les hex longs), run purement numérique (≥ 2 chiffres).
+ */
+const VARIABLE_RUN_RE =
+  /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{8,}|[A-Za-z0-9_-]{16,}|\d{2,}/g;
+
+/** Extension de fichier "courte" reconnue en fin de segment (`.mp4`, `.m3u8`, `.ts`…). */
+const EXTENSION_RE = /^(.*)(\.[A-Za-z0-9]{1,8})$/;
+
+/** Sépare un segment de chemin en `{ base, extension }` ; extension vide si non reconnue. */
+function splitExtension(segment: string): { base: string; extension: string } {
+  const match = segment.match(EXTENSION_RE);
+  if (!match) return { base: segment, extension: '' };
+  return { base: match[1] ?? '', extension: match[2] ?? '' };
+}
+
+/**
+ * Généralise un segment de chemin : remplace les identifiants variables (numériques, hex,
+ * UUID, tokens aléatoires) par `*`, en conservant le préfixe/suffixe littéral stable et
+ * l'extension de fichier (ex. `video-12345.mp4` → `video-*.mp4`). Un segment purement
+ * littéral (mot, nom fixe) reste inchangé ; les segments vides (`//`, début de chemin) aussi.
+ */
+function generalizeSegment(segment: string): string {
+  if (segment === '') return segment;
+  const { base, extension } = splitExtension(segment);
+  const generalizedBase = base.replace(VARIABLE_RUN_RE, '*').replace(/\*{2,}/g, '*');
+  return `${generalizedBase}${extension}`;
+}
+
+/**
+ * Remplace toutes les valeurs de la query string par `*`, en conservant les clés (ordre et
+ * répétitions incluses). Une query string vide reste vide.
+ */
+function generalizeQuery(search: string): string {
+  if (!search) return '';
+  const params = new URLSearchParams(search);
+  const generalized = new URLSearchParams();
+  for (const [key] of params) {
+    generalized.append(key, '*');
+  }
+  return generalized.toString();
+}
+
+/**
+ * Généralise l'URL d'un flux sniffé en `url_pattern` réutilisable pour une `SiteRule` : conserve
+ * le schéma, l'hôte et la structure du chemin, mais remplace par `*` les identifiants variables
+ * (id numériques, hash hex, UUID, tokens) dans le chemin ainsi que toutes les valeurs de la query
+ * string. Le fragment (`#...`) est supprimé — il n'est jamais envoyé au serveur par le navigateur
+ * et n'a donc pas de sens dans un pattern de matching réseau.
+ *
+ * Le pattern produit ne contient que des segments littéraux (échappés par `patternToRegExp`) et
+ * des jokers `*` : il matche donc toujours l'URL d'origine (hors fragment) via `patternToRegExp`.
+ * Une URL invalide est retournée telle quelle, sans tenter de généralisation.
+ */
+export function generalizeUrlPattern(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const pathname = parsed.pathname.split('/').map(generalizeSegment).join('/');
+  const query = generalizeQuery(parsed.search);
+  return `${parsed.origin}${pathname}${query ? `?${query}` : ''}`;
 }
 
 /** Vrai si `hostname` correspond au `domain` d'une règle (égalité ou sous-domaine). */

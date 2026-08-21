@@ -56,6 +56,14 @@ picker. `GET /api/rules` lists existing rules (manual and learned), `DELETE /api
 allows removing one that has become obsolete (e.g. a change in the site's video player
 architecture).
 
+The `url_pattern` accepted by `patternToRegExp` (`extension/src/lib/detection.ts`) is either a
+simple glob (only `*` is a wildcard, everything else escaped literally — including `?`, treated as
+a URL's query-string separator and never as a regex quantifier), or a raw regex if the pattern
+contains other regex metacharacters (`^ $ + ( ) { } | [ ] \`). Rules learned via the picker are
+saved as a glob automatically generalized beforehand (see
+[modules/apprentissage.md](apprentissage.md#automatic-pattern-generalization)); manually added
+rules can use either syntax.
+
 ## Merging results on the popup side
 
 The popup (`extension/entrypoints/popup/`) merges, at open time:

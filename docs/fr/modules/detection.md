@@ -57,6 +57,14 @@ picker DOM. `GET /api/rules` liste les règles existantes (manuelles et apprises
 /api/rules/{id}` permet d'en retirer une devenue obsolète (ex. changement d'architecture du lecteur
 vidéo côté site).
 
+`url_pattern` accepté par `patternToRegExp` (`extension/src/lib/detection.ts`) est soit un glob
+simple (seul `*` est un joker, tout le reste échappé littéralement — y compris `?`, traité comme le
+séparateur de query string d'une URL et jamais comme un quantificateur regex), soit une regex brute
+si le pattern contient d'autres métacaractères regex (`^ $ + ( ) { } | [ ] \`). Les règles apprises
+via le picker sont enregistrées sous forme de glob généralisé automatiquement (voir
+[modules/apprentissage.md](apprentissage.md#généralisation-automatique-du-pattern)) ; les règles
+manuelles peuvent utiliser l'une ou l'autre syntaxe.
+
 ## Fusion des résultats côté popup
 
 Le popup (`extension/entrypoints/popup/`) fusionne au moment de l'ouverture :

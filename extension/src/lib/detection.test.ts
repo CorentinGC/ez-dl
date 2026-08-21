@@ -4,6 +4,7 @@ import {
   classifyUrl,
   correlatePickedElement,
   dedupeCandidates,
+  generalizeUrlPattern,
   groupSegmentsByPlaylist,
   isHlsSegment,
   isMediaUrl,
@@ -170,6 +171,13 @@ describe('patternToRegExp', () => {
     expect(re.test('https://cdn.example.com/a/stream.m3u8')).toBe(true);
     expect(re.test('https://cdn.example.com/c/stream.m3u8')).toBe(false);
   });
+
+  it("traite `?` comme le séparateur littéral de query string, pas comme un quantificateur regex", () => {
+    const re = patternToRegExp('https://cdn.example.com/video?id=*');
+    expect(re.test('https://cdn.example.com/video?id=12345')).toBe(true);
+    expect(re.test('https://cdn.example.com/video?id=')).toBe(true);
+    expect(re.test('https://cdn.example.com/videoid=12345')).toBe(false);
+  });
 });
 
 describe('applySiteRules', () => {
@@ -241,5 +249,63 @@ describe('correlatePickedElement', () => {
 
   it("retourne null si rien n'est exploitable", () => {
     expect(correlatePickedElement(basePicked, [])).toBeNull();
+  });
+});
+
+describe('generalizeUrlPattern', () => {
+  /** Vérifie systématiquement que le pattern généralisé matche bien l'URL dont il est dérivé. */
+  function expectPatternMatchesSource(url: string): string {
+    const pattern = generalizeUrlPattern(url);
+    expect(patternToRegExp(pattern).test(url)).toBe(true);
+    return pattern;
+  }
+
+  it('généralise un id purement numérique (≥ 2 chiffres) dans le chemin', () => {
+    const url = 'https://cdn.example.com/videos/12345/master.m3u8';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/videos/*/master.m3u8');
+  });
+
+  it('conserve un identifiant numérique trop court (1 chiffre) tel quel', () => {
+    const url = 'https://cdn.example.com/videos/v2/master.m3u8';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/videos/v2/master.m3u8');
+  });
+
+  it('généralise un hash hexadécimal (≥ 8 caractères) dans le chemin', () => {
+    const url = 'https://cdn.example.com/files/a3f5c9d2e1b8/video.mp4';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/files/*/video.mp4');
+  });
+
+  it('généralise un UUID dans le chemin', () => {
+    const url = 'https://cdn.example.com/stream/550e8400-e29b-41d4-a716-446655440000/index.m3u8';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/stream/*/index.m3u8');
+  });
+
+  it('généralise un token aléatoire (≥ 16 caractères, non hexadécimal) dans le chemin', () => {
+    const url = 'https://cdn.example.com/get/aZ9bQ7xM2kLp5vRt8nWc/video.mp4';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/get/*/video.mp4');
+  });
+
+  it('généralise un segment mixte en conservant préfixe/suffixe/extension stables', () => {
+    const url = 'https://cdn.example.com/videos/video-12345.mp4';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/videos/video-*.mp4');
+  });
+
+  it('conserve les clés de la query string et remplace toutes les valeurs par *', () => {
+    const url = 'https://cdn.example.com/api/stream?id=12345&token=abcDEF123456&format=hls';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/api/stream?id=*&token=*&format=*');
+  });
+
+  it('supprime le fragment (jamais envoyé au serveur)', () => {
+    const pattern = generalizeUrlPattern('https://cdn.example.com/videos/12345/master.m3u8#t=30');
+    expect(pattern).toBe('https://cdn.example.com/videos/*/master.m3u8');
+  });
+
+  it("retourne l'URL telle quelle si elle est invalide", () => {
+    expect(generalizeUrlPattern('not a url')).toBe('not a url');
+  });
+
+  it('laisse un chemin purement littéral (aucun identifiant variable) inchangé', () => {
+    const url = 'https://cdn.example.com/hls/master.m3u8';
+    expect(expectPatternMatchesSource(url)).toBe('https://cdn.example.com/hls/master.m3u8');
   });
 });

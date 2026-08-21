@@ -3,8 +3,9 @@
  * (probe + sniffing), et états vides/erreurs explicites.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ApiClient } from '@/src/lib/api';
+import { generalizeUrlPattern } from '@/src/lib/detection';
 import type { SaveRuleRequest, SaveRuleResponse, StartPickerRequest } from '@/src/lib/messaging';
 import type { ExtensionSettings, PickedElementInfo, Preset } from '@/src/lib/types';
 import type { ActiveTabInfo } from '../hooks/useActiveTab';
@@ -113,14 +114,17 @@ function PickedElementBanner({ element, domain, onSaved }: PickedElementBannerPr
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const candidateUrl = element.currentSrc || element.src;
+  // Pattern réellement mémorisé : identifiants variables (id, hash, uuid, token) réduits à `*`
+  // pour que la règle reste valable sur les prochaines vidéos du site, pas seulement celle-ci.
+  const generalizedPattern = useMemo(() => (candidateUrl ? generalizeUrlPattern(candidateUrl) : null), [candidateUrl]);
 
   const save = useCallback(async () => {
-    if (!candidateUrl) return;
+    if (!generalizedPattern) return;
     setSaving(true);
     const request: SaveRuleRequest = {
       type: 'SAVE_RULE',
       domain,
-      urlPattern: candidateUrl,
+      urlPattern: generalizedPattern,
       label: `Élément choisi via le picker (${element.selector})`,
       source: 'learned',
     };
@@ -130,14 +134,14 @@ function PickedElementBanner({ element, domain, onSaved }: PickedElementBannerPr
       setSaved(true);
       onSaved();
     }
-  }, [candidateUrl, domain, element.selector, onSaved]);
+  }, [domain, element.selector, generalizedPattern, onSaved]);
 
   return (
     <div className="picker-banner" role="status">
-      {candidateUrl ? (
+      {generalizedPattern ? (
         <>
           <p>
-            Flux détecté via le picker : <code>{truncate(candidateUrl)}</code>
+            Flux détecté via le picker, règle mémorisée : <code>{truncate(generalizedPattern)}</code>
           </p>
           {saved ? (
             <p className="field-success">Règle enregistrée pour {domain}.</p>
