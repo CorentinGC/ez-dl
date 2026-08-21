@@ -107,6 +107,27 @@ def _downloaded_file(work_dir: Path) -> Path:
     return max(candidates, key=lambda path: path.stat().st_size)
 
 
+# Au-delà, c'est que quelque chose tourne en rond : mieux vaut échouer que boucler.
+_MAX_DEDUPE_ATTEMPTS = 999
+
+
+def _free_destination(destination: Path) -> Path:
+    """Retourne `destination`, ou un nom libre dérivé (`film (2).mkv`) si elle est prise.
+
+    `os.rename` écrase la cible **sans erreur** : sur une bibliothèque média, un job dont le
+    nom coïncide avec un fichier existant le détruirait définitivement. On dérive donc un nom
+    libre, comme le fait un navigateur, plutôt que d'écraser.
+    """
+    if not destination.exists():
+        return destination
+    stem, suffix = destination.stem, destination.suffix
+    for index in range(2, _MAX_DEDUPE_ATTEMPTS + 2):
+        candidate = destination.with_name(f"{stem} ({index}){suffix}")
+        if not candidate.exists():
+            return candidate
+    raise OSError(f"Impossible de dériver un nom libre pour {destination.name}")
+
+
 def _atomic_move(source: Path, destination: Path) -> None:
     """Déplace `source` vers `destination` ; repli sur une copie si périphérique différent."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -320,9 +341,18 @@ class JobQueue:
         """
         self._update_job(session, job, status=JobStatus.MOVING)
         try:
-            _atomic_move(source, destination)
+            final_path = _free_destination(destination)
+            _atomic_move(source, final_path)
         except OSError as exc:
             self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
             return
-        final_size = destination.stat().st_size
-        self._update_job(session, job, status=JobStatus.DONE, progress=100.0, size=final_size)
+        # `filename` reflète le fichier réellement écrit : l'UI ne doit pas annoncer un nom
+        # que la déduplication a changé.
+        self._update_job(
+            session,
+            job,
+            status=JobStatus.DONE,
+            progress=100.0,
+            size=final_path.stat().st_size,
+            filename=final_path.name,
+        )

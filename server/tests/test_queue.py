@@ -197,6 +197,28 @@ async def test_run_job_ignores_partial_leftovers(job_queue, monkeypatch) -> None
     assert (settings.roots[0].path / "video.mp4").read_bytes() == b"final"
 
 
+async def test_run_job_never_overwrites_an_existing_file(job_queue, monkeypatch) -> None:
+    """`os.rename` écrase sans erreur : un job dont le nom coïncide avec un fichier existant
+    doit dériver un nom libre, jamais détruire l'original."""
+    queue, engine, settings = job_queue
+    existing = settings.roots[0].path / "video.mp4"
+    existing.write_bytes(b"ORIGINAL A NE PAS PERDRE")
+    job_id = _create_job(engine, settings)
+    _install_fake_ytdlp(monkeypatch, {"download.mp4": b"nouveau"})
+
+    await queue._run_job(job_id)
+
+    assert existing.read_bytes() == b"ORIGINAL A NE PAS PERDRE"
+    assert (settings.roots[0].path / "video (2).mp4").read_bytes() == b"nouveau"
+    with Session(engine) as session:
+        persisted = session.get(Job, job_id)
+        assert persisted is not None
+        assert persisted.status == JobStatus.DONE.value
+        # L'UI doit annoncer le nom réellement écrit, pas celui demandé.
+        assert persisted.filename == "video (2).mp4"
+        assert persisted.size == len(b"nouveau")
+
+
 async def test_run_job_reports_error_when_ytdlp_produced_nothing(job_queue, monkeypatch) -> None:
     """Sortie vide malgré un code retour 0 : le job passe en erreur explicite, pas en `done`."""
     queue, engine, settings = job_queue
