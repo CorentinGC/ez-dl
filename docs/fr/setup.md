@@ -44,7 +44,7 @@ racine pour le gabarit avec valeurs génériques).
 | `EZDL_PORT` | `8000` | Port HTTP |
 | `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Racines autorisées, format `Label=/chemin` séparées par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. |
 | `EZDL_DATA_DIR` | `/config` | SQLite + état persistant |
-| `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Fichiers partiels avant déplacement final |
+| `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Fichiers partiels avant déplacement final. Doit **persister** pour que la reprise d'un téléchargement interrompu serve à quelque chose (voir ci-dessous) |
 | `EZDL_MAX_CONCURRENT_JOBS` | `2` | Nombre de workers de la queue |
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS` | `24` | Période de l'auto-update yt-dlp (`0` = désactivé) |
 | `EZDL_YTDLP_BINARY` | `yt-dlp` | Chemin du binaire yt-dlp |
@@ -68,6 +68,15 @@ pour le contexte) :
   par l'utilisateur du conteneur) déclenche un `WARNING` au démarrage, et tout job la visant est
   refusé en `400` avant le téléchargement.
 - Monter un volume persistant sur `EZDL_DATA_DIR` (SQLite + état).
+- `EZDL_TEMP_DIR` est monté sur le **volume nommé `ezdl-temp`**, et non en tmpfs : un
+  téléchargement coupé par un redémarrage repart alors de son fichier partiel au lieu d'être
+  refait en entier. Le serveur purge à chaque démarrage les dossiers de travail des jobs qui ne
+  sont plus reprenables. Pour repasser en RAM (aucune écriture disque, mais aucune reprise
+  possible et taille limitée par la RAM), remplacer la ligne `- ezdl-temp:/tmp/ez-dl` par une
+  section `tmpfs: [ "/tmp/ez-dl" ]`.
+- Le sous-dossier `/tmp/ez-dl/cookies` reste monté en **tmpfs par-dessus** ce volume : les
+  cookies transmis par l'extension ne touchent jamais le disque, contrairement aux fichiers
+  partiels. Ne pas retirer ce montage.
 - Bloc GPU optionnel (NVIDIA/QuickSync/VAAPI) uniquement si des presets matériels sont utilisés —
   voir [modules/conversion.md](modules/conversion.md).
 - Charger `EZDL_PASSWORD` et les autres variables via un fichier `.env` (jamais commité) ou les

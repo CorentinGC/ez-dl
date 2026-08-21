@@ -47,6 +47,9 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
       `POST /api/jobs/{id}/{pause,resume}`, dossier de travail conservé tant que le job est
       reprenable, jobs coupés par un redémarrage suspendus au lieu d'être mis en erreur.
       90 tests pytest, red-green vérifié par mutation du correctif.
+- [x] 2026-08-21 (nuit) : `ez-dl-x3s` `EZDL_TEMP_DIR` persistant (volume nommé `ezdl-temp`,
+      tmpfs conservé sur le seul sous-dossier `cookies/`), Dockerfile qui crée et chowne le
+      dossier, purge des résidus au démarrage de `JobQueue.start()`. 91 tests pytest.
 
 ## Décisions récentes (2026-08-21)
 
@@ -133,6 +136,14 @@ Squelette complet et vérifié, jamais commité (aucun `git commit` fait à ce s
 - **La reprise d'un téléchargement dépend de la persistance d'`EZDL_TEMP_DIR`** : c'est le `.part`
   du dossier de travail qui permet à `yt-dlp --continue` de repartir de l'octet atteint. Monté en
   tmpfs, il disparaît au redémarrage du conteneur → la reprise refait tout le téléchargement.
+  Depuis `ez-dl-x3s`, le compose monte le volume nommé `ezdl-temp` sur `/tmp/ez-dl` **et** un
+  tmpfs par-dessus `/tmp/ez-dl/cookies` (les cookies ne doivent pas toucher le disque, les
+  fichiers partiels si). Vérifié en conteneur : montages imbriqués OK, `.part` conservé entre
+  deux runs, dossier `cookies/` vidé.
+- **Un volume nommé vide hérite du propriétaire du dossier de l'IMAGE** : sans `mkdir -p
+  /tmp/ez-dl && chown ezdl` dans le Dockerfile, le volume monté appartient à `root:root` et le
+  serveur non-root ne peut rien y écrire (`Permission denied` au premier job). Vaut pour tout
+  chemin monté en volume nommé.
 - **Un arrêt demandé ressemble à une panne** : SIGTERM (pause) comme SIGKILL (annulation) font
   échouer `wait_download` exactement comme une erreur réseau. Seuls les drapeaux
   `_pause_requested`/`_cancel_requested` distinguent les trois cas — le code de retour, non.

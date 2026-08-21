@@ -14,6 +14,18 @@ if TYPE_CHECKING:
 
 _NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n"
 
+# Sous-dossier dédié aux cookie-jars, à l'intérieur d'`EZDL_TEMP_DIR`. Le reste du dossier
+# temporaire doit **persister** (les fichiers partiels servent à reprendre un téléchargement),
+# les cookies non : le compose monte ce seul sous-chemin en tmpfs pour qu'ils ne touchent
+# jamais la couche disque du conteneur.
+COOKIES_DIRNAME = "cookies"
+COOKIE_JAR_PREFIX = "ez-dl-cookies-"
+
+
+def cookie_jar_dir(temp_dir: Path) -> Path:
+    """Dossier des cookie-jars temporaires pour un `EZDL_TEMP_DIR` donné."""
+    return temp_dir / COOKIES_DIRNAME
+
 
 def _format_cookie_line(cookie: CookieItem) -> str:
     """Formate un cookie en une ligne du format Netscape cookie-jar (TSV)."""
@@ -39,14 +51,15 @@ def cookie_jar_file(cookies: list[CookieItem] | None, temp_dir: Path) -> Iterato
     supprimé à la sortie du contexte. Retourne `None` si aucun cookie n'est fourni
     (aucun fichier n'est créé dans ce cas). Les cookies ne sont jamais loggés.
 
-    Le fichier est créé dans `temp_dir` (`EZDL_TEMP_DIR`) et non dans le `/tmp` du système :
-    c'est ce répertoire qui est monté en tmpfs par le compose, donc le seul où des cookies
+    Le fichier est créé dans `<temp_dir>/cookies` et non dans le `/tmp` du système : c'est ce
+    sous-chemin d'`EZDL_TEMP_DIR` que le compose monte en tmpfs, donc le seul où des cookies
     en clair ne touchent pas la couche disque du conteneur."""
     if not cookies:
         yield None
         return
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    fd, raw_path = tempfile.mkstemp(prefix="ez-dl-cookies-", suffix=".txt", dir=temp_dir)
+    jar_dir = cookie_jar_dir(temp_dir)
+    jar_dir.mkdir(parents=True, exist_ok=True)
+    fd, raw_path = tempfile.mkstemp(prefix=COOKIE_JAR_PREFIX, suffix=".txt", dir=jar_dir)
     path = Path(raw_path)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

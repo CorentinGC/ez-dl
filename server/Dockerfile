@@ -128,6 +128,15 @@ RUN groupadd --gid "${PGID}" ezdl \
     && useradd --uid "${PUID}" --gid "${PGID}" --create-home --shell /usr/sbin/nologin ezdl \
     && chown "${PUID}:${PGID}" /usr/local/bin/yt-dlp
 
+# Dossier de travail des téléchargements (EZDL_TEMP_DIR) + sous-dossier des cookie-jars.
+# Créés et attribués à l'utilisateur applicatif ICI parce qu'un volume nommé vide est
+# initialisé par docker à partir du contenu de l'image, propriétaire compris : sans ce
+# mkdir/chown, le volume monté sur /tmp/ez-dl appartiendrait à root et le serveur non-root
+# ne pourrait pas y écrire (le compose monte ce chemin en volume nommé pour permettre la
+# reprise des téléchargements interrompus).
+RUN mkdir -p /tmp/ez-dl/cookies \
+    && chown -R "${PUID}:${PGID}" /tmp/ez-dl
+
 WORKDIR /app
 
 # Venv déjà résolu, copié tel quel : l'image finale ne contient ni compilateur ni

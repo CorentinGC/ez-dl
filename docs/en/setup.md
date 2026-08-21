@@ -44,7 +44,7 @@ root for the template with generic values).
 | `EZDL_PORT` | `8000` | HTTP port |
 | `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Allowed roots, format `Label=/path` separated by `,`. Only these paths (and their subfolders) are writable. |
 | `EZDL_DATA_DIR` | `/config` | SQLite + persistent state |
-| `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Partial files before the final move |
+| `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Partial files before the final move. Must **persist** for resuming an interrupted download to be worth anything (see below) |
 | `EZDL_MAX_CONCURRENT_JOBS` | `2` | Number of queue workers |
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS` | `24` | yt-dlp auto-update period (`0` = disabled) |
 | `EZDL_YTDLP_BINARY` | `yt-dlp` | Path to the yt-dlp binary |
@@ -68,6 +68,14 @@ for context):
   by the container user) raises a `WARNING` at startup, and any job targeting it is rejected with
   a `400` before the download starts.
 - Mount a persistent volume on `EZDL_DATA_DIR` (SQLite + state).
+- `EZDL_TEMP_DIR` is mounted on the **named volume `ezdl-temp`**, not on a tmpfs: a download cut
+  short by a restart then picks up from its partial file instead of being redone from scratch. On
+  every startup the server purges the work directories of jobs that are no longer resumable. To
+  go back to RAM (no disk writes, but no resume and a size capped by RAM), replace the
+  `- ezdl-temp:/tmp/ez-dl` line with a `tmpfs: [ "/tmp/ez-dl" ]` section.
+- The `/tmp/ez-dl/cookies` subdirectory stays mounted as a **tmpfs on top of** that volume: the
+  cookies sent by the extension never touch the disk, unlike partial files. Do not remove that
+  mount.
 - Optional GPU block (NVIDIA/QuickSync/VAAPI) only if hardware presets are used —
   see [modules/conversion.md](modules/conversion.md).
 - Load `EZDL_PASSWORD` and the other variables via an `.env` file (never committed) or

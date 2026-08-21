@@ -12,6 +12,7 @@ from sqlmodel import Session
 
 from app.config import Settings
 from app.core import ytdlp
+from app.core.cookies import cookie_jar_dir
 from app.core.queue import INTERRUPTED_MESSAGE, JobQueue, _progress_fields
 from app.db import get_engine, init_db
 from app.models import Job, JobStatus
@@ -438,3 +439,50 @@ def test_recover_interrupted_jobs_suspends_instead_of_erroring(job_queue) -> Non
         assert persisted.error == INTERRUPTED_MESSAGE
         # Vitesse et ETA d'un job arrêté seraient trompeurs dans l'UI.
         assert persisted.speed is None and persisted.eta is None
+
+
+async def test_start_purges_stale_temp_residue_but_keeps_resumable_jobs(job_queue) -> None:
+    """Le dossier temporaire persiste désormais : au démarrage, il faut jeter ce qui n'est
+    plus reprenable (et les cookie-jars laissés par un SIGKILL) sans toucher au reste."""
+    queue, engine, settings = job_queue
+
+    orphan = settings.temp_dir / "11111111-1111-4111-8111-111111111111"
+    orphan.mkdir(parents=True)
+    (orphan / "download.mp4.part").write_bytes(b"o" * 128)
+
+    done_id = _create_job(engine, settings, filename="fini.mp4")
+    queue.update(done_id, status=JobStatus.DONE)
+    done_dir = queue.work_dir(done_id)
+    done_dir.mkdir(parents=True)
+
+    paused_id = _create_job(engine, settings, filename="suspendu.mp4")
+    queue.update(paused_id, status=JobStatus.PAUSED)
+    kept = queue.work_dir(paused_id)
+    kept.mkdir(parents=True)
+    (kept / "download.mp4.part").write_bytes(b"k" * 128)
+
+    jar_dir = cookie_jar_dir(settings.temp_dir)
+    jar_dir.mkdir(parents=True)
+    stale_jar = jar_dir / "ez-dl-cookies-abcdef.txt"
+    stale_jar.write_text("secret")
+    legacy_jar = settings.temp_dir / "ez-dl-cookies-legacy.txt"
+    legacy_jar.write_text("secret")
+
+    # `EZDL_TEMP_DIR` peut être partagé : ce qui n'est pas à ez-dl reste intact.
+    stranger = settings.temp_dir / "not-ours.txt"
+    stranger.write_text("keep")
+    stranger_dir = settings.temp_dir / "autre-appli"
+    stranger_dir.mkdir()
+
+    await queue.start()
+    await queue.shutdown()
+
+    assert not orphan.exists()
+    assert not done_dir.exists()
+    assert kept.exists()
+    assert (kept / "download.mp4.part").read_bytes() == b"k" * 128
+    assert not stale_jar.exists()
+    assert not legacy_jar.exists()
+    assert jar_dir.is_dir()  # point de montage tmpfs : on purge son contenu, pas lui
+    assert stranger.exists()
+    assert stranger_dir.exists()

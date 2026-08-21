@@ -17,7 +17,12 @@ from app.config import Settings
 from app.core import ffmpeg, ytdlp
 from app.core.cookies import cookie_jar_file
 from app.core.paths import PathSecurityError, resolve_destination
-from app.core.workdir import atomic_move, downloaded_file, free_destination
+from app.core.workdir import (
+    atomic_move,
+    downloaded_file,
+    free_destination,
+    purge_temp_residue,
+)
 from app.models import Job, JobStatus, utcnow
 
 if TYPE_CHECKING:
@@ -35,6 +40,14 @@ _STUCK_STATUSES = [
 # Message porté par un job suspendu par un arrêt du serveur : la reprise est possible, ce
 # n'est donc pas une erreur, mais l'UI doit pouvoir expliquer pourquoi le job s'est arrêté.
 INTERRUPTED_MESSAGE = "Interrompu par un redémarrage du serveur"
+
+# Statuts dont le dossier de travail doit survivre à un redémarrage : leur fichier partiel
+# est encore exploitable par une reprise.
+_RESUMABLE_STATUSES = [
+    JobStatus.QUEUED.value,
+    JobStatus.PAUSED.value,
+    JobStatus.ERROR.value,
+]
 
 
 @dataclass
@@ -108,8 +121,9 @@ class JobQueue:
         self._pause_requested: set[str] = set()
 
     async def start(self) -> None:
-        """Démarre les workers et suspend les jobs interrompus par un arrêt du serveur."""
+        """Démarre les workers, suspend les jobs interrompus, purge les résidus temporaires."""
         self._recover_interrupted_jobs()
+        self._purge_temp_residue()
         for _ in range(max(1, self._settings.max_concurrent_jobs)):
             self._workers.append(asyncio.create_task(self._worker_loop()))
 
@@ -181,6 +195,19 @@ class JobQueue:
                 job.updated_at = utcnow()
                 session.add(job)
             session.commit()
+
+    def _purge_temp_residue(self) -> None:
+        """Nettoie `EZDL_TEMP_DIR` des restes de l'exécution précédente.
+
+        Appelé **après** `_recover_interrupted_jobs`, pour que les jobs coupés par l'arrêt
+        précédent soient déjà repassés en `paused` et gardent donc leur fichier partiel.
+        """
+        with Session(self._engine) as session:
+            resumable = {
+                job.id
+                for job in session.exec(select(Job).where(Job.status.in_(_RESUMABLE_STATUSES)))
+            }
+        purge_temp_residue(self._settings.temp_dir, resumable)
 
     async def _worker_loop(self) -> None:
         """Boucle d'un worker : dépile un job et exécute son pipeline."""

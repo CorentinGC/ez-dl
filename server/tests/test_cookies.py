@@ -1,5 +1,5 @@
-"""Tests de `app.core.cookies` : le cookie-jar temporaire reste dans `EZDL_TEMP_DIR`,
-en permissions 0600, et disparaît quoi qu'il arrive."""
+"""Tests de `app.core.cookies` : le cookie-jar temporaire reste dans le sous-dossier
+`cookies/` d'`EZDL_TEMP_DIR`, en permissions 0600, et disparaît quoi qu'il arrive."""
 
 from __future__ import annotations
 
@@ -8,20 +8,22 @@ from pathlib import Path
 
 import pytest
 
-from app.core.cookies import cookie_jar_file
+from app.core.cookies import cookie_jar_dir, cookie_jar_file
 from app.schemas import CookieItem
 
 COOKIE = CookieItem(name="auth_token", value="s3cr3t", domain=".example.com", path="/")
 
 
 def test_jar_is_created_in_temp_dir_with_0600(tmp_path: Path) -> None:
-    """Le fichier doit vivre dans `EZDL_TEMP_DIR` (monté en tmpfs par le compose), pas dans
-    le `/tmp` du système, et n'être lisible que par son propriétaire."""
+    """Le fichier doit vivre dans `<EZDL_TEMP_DIR>/cookies` — le seul sous-chemin que le
+    compose monte en tmpfs, le reste du dossier temporaire persistant pour la reprise des
+    téléchargements — et n'être lisible que par son propriétaire."""
     temp_dir = tmp_path / "ez-dl"
 
     with cookie_jar_file([COOKIE], temp_dir) as path:
         assert path is not None
-        assert path.parent == temp_dir
+        assert path.parent == cookie_jar_dir(temp_dir)
+        assert path.parent.parent == temp_dir
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert "s3cr3t" in path.read_text(encoding="utf-8")
 

@@ -55,17 +55,22 @@ services:
       # Base SQLite + état applicatif (EZDL_DATA_DIR) — persisté à côté de ce fichier.
       - ./data:/config
 
+      # Fichiers partiels avant déplacement final (EZDL_TEMP_DIR). Volume nommé, donc
+      # persistant : c'est ce qui permet de REPRENDRE un téléchargement interrompu par un
+      # redémarrage au lieu de le refaire entièrement. Pour repasser en RAM (aucune écriture
+      # disque, mais aucune reprise possible et taille limitée par la RAM), remplacer cette
+      # ligne par une section `tmpfs: [ "/tmp/ez-dl" ]`.
+      - ezdl-temp:/tmp/ez-dl
+
       # --- Exemples de montages médias à ADAPTER (chemins réels de votre NAS/disque) ---
       # Doivent correspondre aux racines déclarées dans EZDL_DOWNLOAD_ROOTS ci-dessus.
       # - /mnt/media/movies:/data/movies:rw
       # - /mnt/media/series:/data/series:rw
 
-    # Fichiers partiels avant déplacement final (EZDL_TEMP_DIR). tmpfs = pas de persistance
-    # ni d'écriture disque pour les téléchargements en cours. Si vos téléchargements sont
-    # volumineux et que la RAM est limitée, remplacez par un volume nommé classique :
-    #   volumes: [ "ezdl-temp:/tmp/ez-dl" ]  (+ déclarer le volume `ezdl-temp` en bas de fichier)
+    # Cookie-jars yt-dlp, montés PAR-DESSUS le volume ci-dessus : les cookies transmis par
+    # l'extension ne doivent jamais toucher le disque, contrairement aux fichiers partiels.
     tmpfs:
-      - /tmp/ez-dl
+      - /tmp/ez-dl/cookies:mode=1777,size=16m
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
@@ -73,3 +78,10 @@ services:
       timeout: 5s
       start_period: 60s
       retries: 3
+
+volumes:
+  # Fichiers partiels des téléchargements en cours (EZDL_TEMP_DIR). Volume nommé et non
+  # tmpfs : il survit à `docker compose down`/`up`, ce qui permet de reprendre un
+  # téléchargement interrompu plutôt que de le refaire. Purgé au démarrage du serveur de
+  # tout ce qui n'est plus reprenable.
+  ezdl-temp:
