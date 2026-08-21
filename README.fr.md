@@ -144,7 +144,8 @@ Puis dans Chrome : ouvrez `chrome://extensions`, activez le **mode développeur*
 
 Ouvrez la page **Options** de l'extension et renseignez :
 
-- **URL du serveur** — ex. `http://nas.local:8000`
+- **URL du serveur** — `http://localhost:8000` par défaut ; à changer uniquement pour un serveur
+  distant (ex. `http://nas.local:8000`)
 - **Mot de passe** — la valeur que vous avez définie pour `EZDL_PASSWORD`
 
 Utilisez **Tester la connexion** pour vérifier que l'extension joint bien `/api/health`. C'est

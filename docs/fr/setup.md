@@ -87,9 +87,10 @@ pour le contexte) :
 
 1. (Optionnel) Définir `EZDL_PASSWORD` côté serveur (fichier `.env` ou variable d'environnement du conteneur) pour un mot de passe stable. Si vous ne le définissez pas, le serveur générera un mot de passe à chaque démarrage — voir [ADR 0003](decisions/0003-auth-mot-de-passe.md).
 2. Démarrer le serveur. S'il n'y a pas de mot de passe défini, il affiche un bandeau isolé dans la console avec un mot de passe généré (32 caractères URL-safe) et pause 5 secondes pour permettre de le copier. Vous pouvez récupérer ce mot de passe dans les logs de démarrage.
-3. Dans la page d'options de l'extension : renseigner l'URL du serveur (ex.
-   `http://nas.local:8000`) et le même mot de passe (soit celui défini dans `.env`, soit celui généré et affiché à la démarrage), puis utiliser le bouton **Tester la
-   connexion**.
+3. Dans la page d'options de l'extension : l'URL du serveur vaut `http://localhost:8000` par
+   défaut — rien à saisir si le serveur tourne sur la même machine, sinon la remplacer (ex.
+   `http://nas.local:8000`). Renseigner le mot de passe (celui défini dans `.env` ou celui
+   généré et affiché au démarrage), puis utiliser le bouton **Tester la connexion**.
 4. Le mot de passe est stocké côté extension dans `chrome.storage.local` et envoyé en
    `Authorization: Bearer <mot de passe>` à chaque requête.
 

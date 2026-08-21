@@ -16,7 +16,9 @@ const RULES_CACHE_KEY = 'rulesCache';
 export const RULES_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  serverUrl: '',
+  // Port par défaut du serveur ez-dl (voir docker-compose.yml) : un serveur local tourne sans
+  // configuration préalable de l'URL, seul le mot de passe reste à saisir (auth obligatoire).
+  serverUrl: 'http://localhost:8000',
   password: '',
   favoriteFolders: [],
   defaultFolderPath: null,

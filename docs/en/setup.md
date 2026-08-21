@@ -91,9 +91,10 @@ for context):
 2. Start the server. If no password is set, it displays an isolated banner in the console with
    a generated password (32 URL-safe characters) and pauses for 5 seconds to allow you to copy
    it. You can retrieve this password from the startup logs.
-3. On the extension's options page: enter the server URL (e.g.
-   `http://nas.local:8000`) and the same password (either the one you set in `.env` or the
-   one generated and displayed at startup), then use the **Test connection** button.
+3. On the extension's options page: the server URL defaults to `http://localhost:8000` — nothing
+   to type if the server runs on the same machine, otherwise replace it (e.g.
+   `http://nas.local:8000`). Enter the password (either the one you set in `.env` or the one
+   generated and displayed at startup), then use the **Test connection** button.
 4. The password is stored on the extension side in `chrome.storage.local` and sent as
    `Authorization: Bearer <password>` with every request.
 

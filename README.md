@@ -141,7 +141,8 @@ and select `extension/.output/chrome-mv3`.
 
 Open the extension's **Options** page and set:
 
-- **Server URL** — e.g. `http://nas.local:8000`
+- **Server URL** — defaults to `http://localhost:8000`; change it only for a remote server
+  (e.g. `http://nas.local:8000`)
 - **Password** — the value you set for `EZDL_PASSWORD`
 
 Use **Test connection** to confirm the extension can reach `/api/health`. You're ready — open any
