@@ -173,6 +173,16 @@ tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des rég
       bornées). Priorité du média : vidéo cliquée si la page en a plusieurs, sinon probe, sinon
       média cliqué, sinon flux sniffé. 212 tests Vitest. 2026-08-22.
 
+- [x] `ez-dl-av7` : détection des doublons avant tout envoi, popup **et** bouton en overlay.
+      Nouvelle route de consultation `GET /api/jobs/lookup?url=&folder=&filename=` →
+      `{found, reason:"url"|"file", job, file_exists}` : un job existant sur la même adresse
+      (comparaison **sans la query**, les liens de CDN étant signés ; `canceled`/`error` exclus,
+      un `done` primant sur un job plus récent), sinon le fichier de destination déjà présent
+      (`resolve_destination`, donc soumis aux racines autorisées). Non bloquant : la popup affiche
+      un bandeau d'avertissement et bascule le bouton en « Retélécharger », le badge de l'overlay
+      passe en orange 8 s et un second clic renvoie `force: true`. Un serveur antérieur à la route
+      (404) n'empêche rien, l'échec est avalé. 188 tests pytest, 215 Vitest. 2026-08-22.
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.
@@ -375,3 +385,9 @@ tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des rég
   variante hintée `assets/icon-small.svg` (trait 3u, bords sur des pixels entiers) réservée aux
   rendus 16 et 32 px. Ne jamais juger le dessin dans le SVG : rastériser et regarder à taille
   réelle. Corollaire : `textLength` sur un lockup SVG étale le crénage — laisser la fonte gérer.
+- **Un doublon ne se reconnaît pas à l'URL brute** : les liens de CDN portent des jetons de
+  signature, la même vidéo change d'URL à chaque chargement de page. La comparaison porte donc sur
+  `scheme://host/path` (hôte en minuscules), et le second signal — la présence réelle du fichier de
+  destination — est le seul qui survive à une purge de l'historique ou à une URL différente.
+  Corollaire : la route ne bloque rien, sinon un fichier homonyme d'un autre film interdirait un
+  téléchargement légitime (`ez-dl-av7`).

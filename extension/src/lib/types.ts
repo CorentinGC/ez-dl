@@ -188,6 +188,18 @@ export interface Job {
   updated_at: string;
 }
 
+/**
+ * Réponse de `GET /api/jobs/lookup` : cette vidéo a-t-elle déjà été téléchargée ? Deux signaux —
+ * un job portant la même adresse (query ignorée : les liens de CDN sont signés), et la présence
+ * réelle du fichier de destination, seul indice qui survit à une purge de l'historique.
+ */
+export interface JobDuplicate {
+  found: boolean;
+  reason: 'url' | 'file' | null;
+  job: Job | null;
+  file_exists: boolean;
+}
+
 export interface CreateJobRequest {
   url: string;
   format_id?: string;

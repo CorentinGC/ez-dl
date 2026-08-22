@@ -262,3 +262,47 @@ describe('createApiClient().getPublishedExtension', () => {
     await expect(createApiClient(config).getPublishedExtension()).rejects.toThrow();
   });
 });
+
+describe('createApiClient().lookupExistingJob', () => {
+  const config = { baseUrl: 'http://localhost:8000', password: 'secret' };
+  const notFound = { found: false, reason: null, job: null, file_exists: false };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('encode l’URL, le dossier et le nom de fichier en query', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(notFound), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).lookupExistingJob({
+      url: 'https://example.com/watch?v=abc&t=1',
+      folder: '/data/films',
+      filename: 'Ma vidéo.mp4',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URL(url).searchParams;
+    expect(query.get('url')).toBe('https://example.com/watch?v=abc&t=1');
+    expect(query.get('folder')).toBe('/data/films');
+    expect(query.get('filename')).toBe('Ma vidéo.mp4');
+    expect((init.headers as Headers).get('Authorization')).toBe('Bearer secret');
+  });
+
+  it('omet dossier et nom de fichier quand ils ne sont pas connus', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(notFound), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createApiClient(config).lookupExistingJob({ url: 'https://example.com/v.mp4' });
+
+    const query = new URL((fetchMock.mock.calls[0] as [string, RequestInit])[0]).searchParams;
+    expect(query.has('folder')).toBe(false);
+    expect(query.has('filename')).toBe(false);
+  });
+
+  it('remonte une erreur sur un serveur antérieur à la route (404) — l’appelant la traite en silence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })));
+
+    await expect(createApiClient(config).lookupExistingJob({ url: 'https://example.com/v.mp4' })).rejects.toThrow();
+  });
+});

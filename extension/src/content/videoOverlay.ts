@@ -26,6 +26,8 @@ interface Badge {
   button: HTMLButtonElement;
   state: BadgeState;
   resetTimer: number | null;
+  /** Échéance du second clic « retélécharger quand même », `0` hors fenêtre de confirmation. */
+  forceUntil: number;
 }
 
 interface OverlayState {
@@ -48,6 +50,9 @@ interface OverlayState {
 
 /** Garde-fou : une page pathologique (mur de vidéos) ne doit pas coûter des centaines de boutons. */
 const MAX_BADGES = 12;
+
+/** Fenêtre pendant laquelle un second clic sur un bouton « déjà téléchargée » relance le job. */
+const DUPLICATE_CONFIRM_MS = 8000;
 
 let state: OverlayState | null = null;
 
@@ -213,7 +218,7 @@ function createBadge(video: HTMLVideoElement): Badge {
     },
     true,
   );
-  const badge: Badge = { button, state: 'idle', resetTimer: null };
+  const badge: Badge = { button, state: 'idle', resetTimer: null, forceUntil: 0 };
   state?.shadow.appendChild(button);
   state?.badges.set(video, badge);
   return badge;
@@ -266,6 +271,8 @@ async function requestAvailability(hasDirectMedia: boolean): Promise<void> {
 async function submitQuickDownload(video: HTMLVideoElement): Promise<void> {
   const badge = state?.badges.get(video);
   if (!state || !badge || badge.state === 'sending') return;
+  // Second clic dans la fenêtre de confirmation : l'utilisateur assume le doublon.
+  const isForced = badge.state === 'duplicate' && Date.now() < badge.forceUntil;
   applyBadgeState(badge, 'sending');
   try {
     const request: QuickDownloadRequest = {
@@ -275,18 +282,20 @@ async function submitQuickDownload(video: HTMLVideoElement): Promise<void> {
         title: findVideoTitle(video),
         isOnlyVideo: document.querySelectorAll('video').length === 1,
       },
+      force: isForced,
     };
     const response = (await browser.runtime.sendMessage(request)) as QuickDownloadResponse | undefined;
     if (!response || !response.ok) {
-      applyBadgeState(badge, 'error');
-      showToast(response?.error ?? 'Extension indisponible, rechargez la page.', true);
+      const isDuplicate = response?.duplicate === true;
+      applyBadgeState(badge, isDuplicate ? 'duplicate' : 'error');
+      showToast(response?.error ?? 'Extension indisponible, rechargez la page.', isDuplicate ? 'duplicate' : 'error');
       return;
     }
     applyBadgeState(badge, 'success');
-    showToast('Envoyé au serveur ez-dl.', false);
+    showToast('Envoyé au serveur ez-dl.', 'success');
   } catch {
     applyBadgeState(badge, 'error');
-    showToast('Extension indisponible, rechargez la page.', true);
+    showToast('Extension indisponible, rechargez la page.', 'error');
   }
 }
 
@@ -298,16 +307,20 @@ function applyBadgeState(badge: Badge, next: BadgeState): void {
   badge.state = next;
   setBadgeState(badge.button, next);
   if (badge.resetTimer !== null) clearTimeout(badge.resetTimer);
+  badge.forceUntil = next === 'duplicate' ? Date.now() + DUPLICATE_CONFIRM_MS : 0;
   if (next === 'success' || next === 'error') {
     badge.resetTimer = window.setTimeout(() => applyBadgeState(badge, 'idle'), 2500);
   }
+  if (next === 'duplicate') {
+    badge.resetTimer = window.setTimeout(() => applyBadgeState(badge, 'idle'), DUPLICATE_CONFIRM_MS);
+  }
 }
 
-function showToast(message: string, isError: boolean): void {
+function showToast(message: string, tone: 'success' | 'error' | 'duplicate'): void {
   if (!state) return;
   // `textContent` et non `innerHTML` : le message vient du serveur, il n'est jamais du balisage.
   state.toast.textContent = message;
-  state.toast.dataset.tone = isError ? 'error' : 'success';
+  state.toast.dataset.tone = tone;
   state.toast.style.display = 'block';
   if (state.toastTimer !== null) clearTimeout(state.toastTimer);
   state.toastTimer = window.setTimeout(() => {

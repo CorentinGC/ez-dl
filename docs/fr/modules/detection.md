@@ -158,6 +158,33 @@ données acceptées de la page — l'URL média et le titre de la vidéo cliqué
 avant de finir dans `sanitizeFilename`.
 L'UI vit dans un Shadow DOM (styles isolés dans les deux sens) et se replie pendant le mode picker.
 
+## Détection des doublons
+
+Avant chaque envoi — depuis la popup **comme** depuis le bouton en overlay — l'extension demande au
+serveur si cette vidéo a déjà été téléchargée : `GET /api/jobs/lookup?url=…&folder=…&filename=…`.
+
+Deux signaux, du plus explicite au plus factuel :
+
+| Signal | `reason` | Ce qu'il attrape |
+|---|---|---|
+| Un job existe déjà pour cette adresse | `url` | le même lien renvoyé une seconde fois |
+| Le fichier de destination existe sur le disque | `file` | une vidéo atteinte par une autre URL, ou un historique purgé |
+
+La comparaison d'URL **ignore la query** (`scheme://host/path`, hôte en minuscules) : les liens de
+CDN portent des jetons de signature, deux liens de la même vidéo diffèrent à chaque chargement de
+page. Les jobs `canceled` et `error` ne comptent pas — rien n'a été livré. Un job `done` prime sur un
+job plus récent encore en cours, pour que le message cite le fichier réellement présent.
+
+**Avertissement, jamais blocage** : la route ne fait que consulter, l'appelant décide.
+
+- **Popup** : le bouton affiche un bandeau d'avertissement et devient « Retélécharger » ; le clic
+  suivant force l'envoi.
+- **Bouton en overlay** : le badge passe en orange (« déjà téléchargée ») pendant 8 s ; un second
+  clic dans cette fenêtre relance le job (`force: true` dans `QUICK_DOWNLOAD`).
+
+Un serveur antérieur à cette route (404) ou injoignable ne bloque rien : l'échec de la consultation
+est avalé et le téléchargement suit son cours.
+
 ## Étendre la détection
 
 - **Nouveaux patterns réseau** : ajouter l'extension/content-type dans

@@ -21,6 +21,7 @@ import type {
   FoldersResponse,
   HealthResponse,
   Job,
+  JobDuplicate,
   JobResumeRequest,
   ProbeRequestBody,
   ProbeResponse,
@@ -252,6 +253,17 @@ export function createApiClient(config: ApiClientConfig) {
       request<CreateJobResponse>(config, '/api/jobs', { method: 'POST', body: JSON.stringify(body) }),
 
     listJobs: () => request<Job[]>(config, '/api/jobs'),
+
+    /**
+     * Cette vidéo a-t-elle déjà été téléchargée ? Consultation pure : le serveur ne crée ni ne
+     * bloque rien, c'est l'appelant qui décide d'avertir ou de laisser passer.
+     */
+    lookupExistingJob: (params: { url: string; folder?: string | null; filename?: string | null }) => {
+      const query = new URLSearchParams({ url: params.url });
+      if (params.folder) query.set('folder', params.folder);
+      if (params.filename) query.set('filename', params.filename);
+      return request<JobDuplicate>(config, `/api/jobs/lookup?${query.toString()}`);
+    },
 
     getJob: (id: string) => request<Job>(config, `/api/jobs/${encodeURIComponent(id)}`),
 

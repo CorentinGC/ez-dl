@@ -7,21 +7,23 @@
 
 import { BADGE_SIZE } from '@/src/lib/overlayGeometry';
 
-export type BadgeState = 'idle' | 'sending' | 'success' | 'error';
+export type BadgeState = 'idle' | 'sending' | 'success' | 'error' | 'duplicate';
 
 const BADGE_LABELS: Record<BadgeState, string> = {
   idle: 'Télécharger cette vidéo avec ez-dl',
   sending: 'Envoi au serveur ez-dl…',
   success: 'Envoyé au serveur ez-dl',
   error: 'Échec de l’envoi',
+  duplicate: 'Déjà téléchargée — cliquez à nouveau pour retélécharger',
 };
 
-/** Les quatre icônes coexistent dans le bouton ; le CSS n'en montre qu'une selon `data-state`. */
+/** Toutes les icônes coexistent dans le bouton ; le CSS n'en montre qu'une selon `data-state`. */
 const BADGE_ICONS = `
 <svg class="icon icon-idle" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M4 19h16"/></svg>
 <svg class="icon icon-sending" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" opacity=".25"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>
 <svg class="icon icon-success" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 13 5 5L19 7"/></svg>
-<svg class="icon icon-error" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>`;
+<svg class="icon icon-error" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+<svg class="icon icon-duplicate" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg>`;
 
 export function buildBadge(): HTMLButtonElement {
   const button = document.createElement('button');
@@ -66,12 +68,14 @@ export function buildOverlayStyle(): HTMLStyleElement {
 .ezdl-badge:focus-visible { outline: 2px solid #f9fafb; outline-offset: 2px; }
 .ezdl-badge[data-state="success"] { background: #16a34a; opacity: 1; }
 .ezdl-badge[data-state="error"] { background: #dc2626; opacity: 1; }
+.ezdl-badge[data-state="duplicate"] { background: #d97706; opacity: 1; }
 .ezdl-badge[disabled] { cursor: progress; opacity: 1; }
 .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: none; }
 .ezdl-badge[data-state="idle"] .icon-idle,
 .ezdl-badge[data-state="sending"] .icon-sending,
 .ezdl-badge[data-state="success"] .icon-success,
-.ezdl-badge[data-state="error"] .icon-error { display: block; }
+.ezdl-badge[data-state="error"] .icon-error,
+.ezdl-badge[data-state="duplicate"] .icon-duplicate { display: block; }
 .ezdl-badge[data-state="sending"] .icon-sending { animation: ezdl-spin 900ms linear infinite; }
 @keyframes ezdl-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
@@ -84,6 +88,7 @@ export function buildOverlayStyle(): HTMLStyleElement {
   font: 13px/1.4 -apple-system, system-ui, sans-serif; box-shadow: 0 4px 12px rgba(0, 0, 0, .35);
 }
 .ezdl-toast[data-tone="error"] { background: #7f1d1d; }
+.ezdl-toast[data-tone="duplicate"] { background: #78350f; }
 `;
   return style;
 }

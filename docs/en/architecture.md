@@ -279,6 +279,8 @@ POST   /api/folders         -> body {parent, name} -> 201 {name,path,is_dir}  (4
 POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?}
                             -> {job_id, status}
 GET    /api/jobs            -> [job]
+GET    /api/jobs/lookup     -> ?url=...&folder=...&filename=... -> {found, reason:"url"|"file"|null,
+                               job|null, file_exists} — has this video already been downloaded?
 GET    /api/jobs/{id}       -> job
 POST   /api/jobs/{id}/pause  -> job (409 outside `queued`/`downloading`); keeps the partial file
 POST   /api/jobs/{id}/resume -> optional body {cookies?, headers?, referer?} -> `queued` job

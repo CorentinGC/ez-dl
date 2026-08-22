@@ -14,6 +14,8 @@
   --ez-danger-bg: #fee2e2;
   --ez-success: #16a34a;
   --ez-success-bg: #dcfce7;
+  --ez-warning: #b45309;
+  --ez-warning-bg: #fef3c7;
   --ez-radius: 8px;
   --ez-focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.45);
 }
@@ -33,6 +35,8 @@
     --ez-danger-bg: #3f1d1d;
     --ez-success: #4ade80;
     --ez-success-bg: #123a20;
+    --ez-warning: #fbbf24;
+    --ez-warning-bg: #3d2c07;
   }
 }
 
@@ -410,6 +414,16 @@ select {
 .field-success {
   color: var(--ez-success);
   background: var(--ez-success-bg);
+  border-radius: var(--ez-radius);
+  padding: 6px 8px;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+/* Doublon détecté : avertissement, pas erreur — le téléchargement reste possible au clic suivant. */
+.field-warning {
+  color: var(--ez-warning);
+  background: var(--ez-warning-bg);
   border-radius: var(--ez-radius);
   padding: 6px 8px;
   font-size: 12px;

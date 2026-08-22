@@ -252,7 +252,7 @@ async function handleMessage(message: BackgroundRequest, sender: Browser.runtime
     case 'OVERLAY_CHECK':
       return handleOverlayCheck(sender.tab, message.hasDirectMedia);
     case 'QUICK_DOWNLOAD':
-      return handleQuickDownload(sender.tab, message.clicked);
+      return handleQuickDownload(sender.tab, message.clicked, message.force === true);
     default:
       return { ok: false, error: 'Message inconnu.' };
   }
@@ -340,9 +340,10 @@ async function handleOverlayCheck(
 async function handleQuickDownload(
   tab: Browser.tabs.Tab | undefined,
   clicked: unknown,
+  isForced: boolean,
 ): Promise<QuickDownloadResponse> {
   if (tab?.id === undefined || !tab.url) return { ok: false, error: 'Onglet introuvable.' };
-  return runQuickDownload(tab.id, { url: tab.url, title: tab.title }, clicked);
+  return runQuickDownload(tab.id, { url: tab.url, title: tab.title }, clicked, isForced);
 }
 
 /** Signale au content script qu'une source vient d'apparaître (flux sniffé après chargement). */

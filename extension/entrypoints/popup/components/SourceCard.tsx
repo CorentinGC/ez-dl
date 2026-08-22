@@ -32,6 +32,8 @@ type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'error'; message: string }
+  /** Le serveur connaît déjà cette vidéo : on avertit, le clic suivant force le téléchargement. */
+  | { status: 'duplicate'; message: string }
   | { status: 'success' };
 
 export function SourceCard({ source, apiClient, settings, presets, pageUrl, pageTitle, onDownloaded }: SourceCardProps) {
@@ -50,31 +52,45 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
   const [expanded, setExpanded] = useState(false);
   const [submit, setSubmit] = useState<SubmitState>({ status: 'idle' });
 
-  const handleDownload = useCallback(async () => {
-    if (!folder) {
-      setSubmit({ status: 'error', message: 'Choisissez un dossier de destination.' });
-      setExpanded(true);
-      return;
-    }
-    setSubmit({ status: 'submitting' });
-    try {
-      const cookies = sendCookies ? await readCookiesForUrl(pageUrl) : undefined;
-      await apiClient.createJob({
-        url: source.kind === 'probe' ? source.pageUrl : (sniffedUrl ?? source.mediaUrl),
-        format_id: source.kind === 'probe' && formatId ? formatId : undefined,
-        folder: folder.path,
-        filename: sanitizeFilename(filename),
-        preset_id: presetId,
-        cookies,
-        referer: pageUrl,
-        title: source.title,
-      });
-      setSubmit({ status: 'success' });
-      onDownloaded();
-    } catch (err) {
-      setSubmit({ status: 'error', message: err instanceof Error ? err.message : 'Erreur inconnue.' });
-    }
-  }, [apiClient, filename, folder, formatId, onDownloaded, pageUrl, presetId, sendCookies, sniffedUrl, source]);
+  const handleDownload = useCallback(
+    async (isForced: boolean) => {
+      if (!folder) {
+        setSubmit({ status: 'error', message: 'Choisissez un dossier de destination.' });
+        setExpanded(true);
+        return;
+      }
+      const url = source.kind === 'probe' ? source.pageUrl : (sniffedUrl ?? source.mediaUrl);
+      const safeFilename = sanitizeFilename(filename);
+      setSubmit({ status: 'submitting' });
+      try {
+        if (!isForced) {
+          const duplicate = await lookupDuplicate(apiClient, url, folder.path, safeFilename);
+          if (duplicate) {
+            setSubmit({ status: 'duplicate', message: duplicate });
+            return;
+          }
+        }
+        const cookies = sendCookies ? await readCookiesForUrl(pageUrl) : undefined;
+        await apiClient.createJob({
+          url,
+          format_id: source.kind === 'probe' && formatId ? formatId : undefined,
+          folder: folder.path,
+          filename: safeFilename,
+          preset_id: presetId,
+          cookies,
+          referer: pageUrl,
+          title: source.title,
+        });
+        setSubmit({ status: 'success' });
+        onDownloaded();
+      } catch (err) {
+        setSubmit({ status: 'error', message: err instanceof Error ? err.message : 'Erreur inconnue.' });
+      }
+    },
+    [apiClient, filename, folder, formatId, onDownloaded, pageUrl, presetId, sendCookies, sniffedUrl, source],
+  );
+
+  const isDuplicate = submit.status === 'duplicate';
 
   const thumbnail = source.kind === 'probe' ? source.thumbnail : null;
 
@@ -97,8 +113,13 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
       </div>
 
       <div className="source-card-actions">
-        <button type="button" className="btn btn-primary" disabled={submit.status === 'submitting'} onClick={() => void handleDownload()}>
-          {submit.status === 'submitting' ? 'Envoi…' : 'Télécharger'}
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={submit.status === 'submitting'}
+          onClick={() => void handleDownload(isDuplicate)}
+        >
+          {submit.status === 'submitting' ? 'Envoi…' : isDuplicate ? 'Retélécharger' : 'Télécharger'}
         </button>
         <button type="button" className="btn btn-ghost" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
           {expanded ? 'Masquer les options' : 'Options avancées'}
@@ -107,6 +128,11 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
 
       {submit.status === 'error' ? (
         <p className="field-error" role="alert">
+          {submit.message}
+        </p>
+      ) : null}
+      {isDuplicate ? (
+        <p className="field-warning" role="alert">
           {submit.message}
         </p>
       ) : null}
@@ -202,6 +228,28 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
       ) : null}
     </article>
   );
+}
+
+/**
+ * Message d'avertissement si le serveur a déjà téléchargé cette vidéo, `null` sinon. Une erreur
+ * (serveur d'une version antérieure, route absente) n'empêche jamais le téléchargement.
+ */
+async function lookupDuplicate(
+  apiClient: ApiClient,
+  url: string,
+  folder: string,
+  filename: string,
+): Promise<string | null> {
+  try {
+    const existing = await apiClient.lookupExistingJob({ url, folder, filename });
+    if (!existing.found) return null;
+    const name = existing.job?.filename ?? filename;
+    return existing.reason === 'file'
+      ? `Le fichier « ${name} » existe déjà dans ce dossier. Relancer créera une copie.`
+      : `Déjà téléchargée (« ${name} »). Relancer créera une copie.`;
+  } catch {
+    return null;
+  }
 }
 
 /** Défauts délégués à `quickSource` : la popup et le bouton en overlay doivent proposer le

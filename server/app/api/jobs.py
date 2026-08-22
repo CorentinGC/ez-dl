@@ -6,6 +6,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlmodel import Session, select
@@ -20,7 +21,7 @@ from app.core.paths import (
 from app.core.queue import JobContext
 from app.db import get_session
 from app.models import Job, JobStatus
-from app.schemas import JobCreate, JobCreateResponse, JobOut, JobResume
+from app.schemas import JobCreate, JobCreateResponse, JobDuplicateOut, JobOut, JobResume
 from app.security import require_auth
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,16 @@ _PAUSABLE_STATUSES = {JobStatus.QUEUED, JobStatus.DOWNLOADING}
 # `error`/`canceled` sont repris de la même façon qu'une pause : c'est le fichier partiel
 # éventuellement présent qui décide du travail réellement refait, pas le statut d'origine.
 _RESUMABLE_STATUSES = {JobStatus.PAUSED, JobStatus.ERROR, JobStatus.CANCELED}
+# Un job annulé ou en erreur n'a rien téléchargé d'exploitable : il ne fait pas doublon.
+_DELIVERED_STATUSES = {
+    JobStatus.QUEUED,
+    JobStatus.PROBING,
+    JobStatus.DOWNLOADING,
+    JobStatus.CONVERTING,
+    JobStatus.MOVING,
+    JobStatus.PAUSED,
+    JobStatus.DONE,
+}
 
 
 @router.post("/jobs", response_model=JobCreateResponse, status_code=201)
@@ -100,6 +111,34 @@ async def job_events(request: Request) -> EventSourceResponse:
             broadcaster.unsubscribe(subscriber)
 
     return EventSourceResponse(event_generator())
+
+
+@router.get("/jobs/lookup", response_model=JobDuplicateOut)
+async def lookup_job(
+    request: Request,
+    url: str = Query(..., description="URL de la vidéo à télécharger"),
+    folder: str | None = Query(None, description="Dossier de destination envisagé"),
+    filename: str | None = Query(None, description="Nom de fichier envisagé"),
+    session: Session = Depends(get_session),
+) -> JobDuplicateOut:
+    """Cette vidéo a-t-elle déjà été téléchargée ?
+
+    Deux signaux, du plus explicite au plus factuel :
+
+    1. un job existant porte la même adresse (comparaison sans la query, qui contient les
+       jetons de signature des CDN : deux liens signés d'une même vidéo diffèrent) ;
+    2. le fichier de destination existe déjà sur le disque — seul signal qui survit à une
+       purge de l'historique, et qui rattrape une même vidéo atteinte par une autre URL.
+
+    Route de consultation : elle ne crée rien et ne bloque rien, l'appelant décide.
+    """
+    job = _find_job_by_url(session, url)
+    file_exists = _destination_exists(request, folder, filename)
+    if job is not None:
+        return JobDuplicateOut(found=True, reason="url", job=job, file_exists=file_exists)
+    if file_exists:
+        return JobDuplicateOut(found=True, reason="file", file_exists=True)
+    return JobDuplicateOut(found=False)
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
@@ -225,6 +264,41 @@ def _remove_downloaded_file(request: Request, job: Job) -> None:
         ) from exc
     if not removed:
         logger.info("Job %s : fichier déjà absent de la destination, rien à effacer.", job.id)
+
+
+def _normalized_url(url: str) -> str:
+    """Adresse comparable : schéma, hôte et chemin, sans query ni fragment.
+
+    Les URL de CDN portent des jetons de signature à durée de vie courte : deux
+    téléchargements de la même vidéo n'ont jamais la même query.
+    """
+    parts = urlsplit(url)
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path}"
+
+
+def _find_job_by_url(session: Session, url: str) -> Job | None:
+    """Job le plus pertinent portant la même adresse : un job abouti d'abord, sinon le
+    plus récent (l'ordre de la requête est déjà décroissant)."""
+    target = _normalized_url(url)
+    matches = [
+        job
+        for job in session.exec(select(Job).order_by(Job.created_at.desc())).all()
+        if JobStatus(job.status) in _DELIVERED_STATUSES and _normalized_url(job.url) == target
+    ]
+    done = next((job for job in matches if job.status == JobStatus.DONE.value), None)
+    return done or (matches[0] if matches else None)
+
+
+def _destination_exists(request: Request, folder: str | None, filename: str | None) -> bool:
+    """Le fichier de destination est-il déjà là ? Une destination invalide n'est pas une
+    erreur ici : la création du job la refusera, cette route se contente de dire « non »."""
+    if not folder or not filename:
+        return False
+    try:
+        destination = resolve_destination(folder, filename, request.app.state.settings.roots)
+    except PathSecurityError:
+        return False
+    return destination.is_file()
 
 
 def _job_or_404(session: Session, job_id: str) -> Job:

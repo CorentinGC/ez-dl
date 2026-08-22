@@ -107,9 +107,13 @@ export interface QuickDownloadRequest {
     title: string | null;
     isOnlyVideo: boolean;
   };
+  /** Second clic sur un bouton passé en « déjà téléchargé » : refaire quand même le job. */
+  force?: boolean;
 }
 
-export type QuickDownloadResponse = { ok: true; jobId: string } | { ok: false; error: string };
+export type QuickDownloadResponse =
+  | { ok: true; jobId: string }
+  | { ok: false; error: string; duplicate?: boolean };
 
 // ---------------------------------------------------------------------------
 // Background -> content (ciblé via `browser.tabs.sendMessage`)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -255,6 +255,18 @@ class JobOut(BaseModel):
     format_id: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class JobDuplicateOut(BaseModel):
+    """Résultat de `GET /api/jobs/lookup` : cette vidéo a-t-elle déjà été téléchargée ?"""
+
+    found: bool
+    #: `url` = un job porte la même adresse, `file` = le fichier de destination existe déjà.
+    reason: Literal["url", "file"] | None = None
+    #: Job correspondant quand la correspondance vient de l'historique.
+    job: JobOut | None = None
+    #: Le fichier de destination existe déjà sur le disque du serveur.
+    file_exists: bool = False
 
 
 class JobCreateResponse(BaseModel):

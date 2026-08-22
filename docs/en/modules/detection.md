@@ -155,6 +155,34 @@ clicked video's media URL and title — goes through `sanitizeClickedVideo`: `ht
 required, bounded lengths, title flattened to a single line before reaching `sanitizeFilename`. The UI lives in a Shadow DOM (styles
 isolated both ways) and steps aside while the picker mode is active.
 
+## Duplicate detection
+
+Before every submission — from the popup **and** from the overlay button — the extension asks the
+server whether this video has already been downloaded:
+`GET /api/jobs/lookup?url=…&folder=…&filename=…`.
+
+Two signals, from the most explicit to the most factual:
+
+| Signal | `reason` | What it catches |
+|---|---|---|
+| A job already exists for this address | `url` | the same link submitted a second time |
+| The destination file exists on disk | `file` | a video reached through a different URL, or a purged history |
+
+URL comparison **drops the query string** (`scheme://host/path`, lowercased host): CDN links carry
+signature tokens, so two links to the same video differ on every page load. `canceled` and `error`
+jobs do not count — nothing was delivered. A `done` job wins over a more recent, still-running one,
+so the message names the file that is actually there.
+
+**A warning, never a block**: the route only reports, the caller decides.
+
+- **Popup**: the card shows a warning banner and the button becomes “Retélécharger”; the next click
+  forces the submission.
+- **Overlay button**: the badge turns amber (“already downloaded”) for 8 s; a second click within
+  that window re-runs the job (`force: true` in `QUICK_DOWNLOAD`).
+
+A server predating this route (404) or an unreachable one blocks nothing: the failed lookup is
+swallowed and the download proceeds.
+
 ## Extending detection
 
 - **New network patterns**: add the extension/content-type in `extension/lib/sniffer.ts`, with an

@@ -49,6 +49,7 @@ export async function runQuickDownload(
   tabId: number,
   tab: { url: string; title?: string },
   rawClicked: unknown,
+  isForced = false,
 ): Promise<QuickDownloadResponse> {
   const tabUrl = tab.url;
   const clicked = sanitizeClickedVideo(rawClicked);
@@ -73,8 +74,14 @@ export async function runQuickDownload(
   if (!source) return { ok: false, error: 'Aucune vidéo téléchargeable détectée sur cette page.' };
 
   try {
+    const client = createApiClient(toApiConfig(settings));
+    // Avertissement sans blocage : le second clic sur le bouton passe `isForced` et refait le job.
+    if (!isForced) {
+      const duplicate = await findDuplicate(client, source.url, folder.path, source.filename);
+      if (duplicate) return { ok: false, error: duplicate, duplicate: true };
+    }
     const cookies = settings.sendCookies ? await readCookiesForUrl(tabUrl) : undefined;
-    const response = await createApiClient(toApiConfig(settings)).createJob({
+    const response = await client.createJob({
       url: source.url,
       format_id: source.formatId ?? undefined,
       folder: folder.path,
@@ -154,4 +161,22 @@ async function probeTab(tabUrl: string, settings: ExtensionSettings): Promise<Pr
 
 function isProbeableUrl(url: string): boolean {
   return url.startsWith('http://') || url.startsWith('https://');
+}
+
+/** Message d'avertissement si la vidéo a déjà été téléchargée, `null` sinon. */
+async function findDuplicate(
+  client: ReturnType<typeof createApiClient>,
+  url: string,
+  folder: string,
+  filename: string,
+): Promise<string | null> {
+  try {
+    const existing = await client.lookupExistingJob({ url, folder, filename });
+    if (!existing.found) return null;
+    const name = existing.job?.filename ?? filename;
+    return `Déjà téléchargé (${name}). Cliquez à nouveau pour retélécharger.`;
+  } catch {
+    // Serveur d'une version antérieure (404) ou injoignable : ne pas empêcher le téléchargement.
+    return null;
+  }
 }

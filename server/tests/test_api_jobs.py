@@ -346,3 +346,111 @@ def test_create_job_targeting_system_folder_returns_400(client_no_worker, downlo
     )
 
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/lookup — déjà téléchargé ? (ez-dl-av7)
+# ---------------------------------------------------------------------------
+
+
+def _lookup(client, url: str, download_root=None, filename: str | None = None):
+    params = {"url": url}
+    if download_root is not None:
+        params["folder"] = str(download_root)
+    if filename is not None:
+        params["filename"] = filename
+    return client.get("/api/jobs/lookup", params=params, headers=AUTH)
+
+
+def test_lookup_reports_nothing_on_a_fresh_server(client_no_worker, download_root) -> None:
+    response = _lookup(client_no_worker, "https://example.com/video", download_root, "video.mp4")
+
+    assert response.status_code == 200
+    assert response.json() == {"found": False, "reason": None, "job": None, "file_exists": False}
+
+
+def test_lookup_matches_a_previous_job_by_url(client_no_worker, download_root) -> None:
+    job_id = _create_done_job(client_no_worker, download_root)
+
+    body = _lookup(client_no_worker, "https://example.com/video").json()
+
+    assert body["found"] is True
+    assert body["reason"] == "url"
+    assert body["job"]["id"] == job_id
+
+
+def test_lookup_ignores_the_query_string_of_signed_cdn_urls(
+    client_no_worker, download_root
+) -> None:
+    """Deux liens signés d'une même vidéo ne partagent que schéma, hôte et chemin."""
+    _create_done_job(client_no_worker, download_root)
+
+    body = _lookup(client_no_worker, "https://example.com/video?token=abc&expires=1").json()
+
+    assert body["found"] is True
+    assert body["reason"] == "url"
+
+
+def test_lookup_does_not_match_another_video_on_the_same_host(
+    client_no_worker, download_root
+) -> None:
+    _create_done_job(client_no_worker, download_root)
+
+    assert _lookup(client_no_worker, "https://example.com/autre").json()["found"] is False
+
+
+def test_lookup_ignores_canceled_and_failed_jobs(client_no_worker, download_root) -> None:
+    """Un job annulé ou en erreur n'a rien livré : proposer de le refaire est le bon défaut."""
+    from app.models import JobStatus
+
+    job_id = _create_queued_job(client_no_worker, download_root)
+    client_no_worker.app.state.job_queue.update(job_id, status=JobStatus.CANCELED)
+
+    assert _lookup(client_no_worker, "https://example.com/video").json()["found"] is False
+
+
+def test_lookup_prefers_the_finished_job_over_a_newer_pending_one(
+    client_no_worker, download_root
+) -> None:
+    done_id = _create_done_job(client_no_worker, download_root)
+    _create_queued_job(client_no_worker, download_root)
+
+    assert _lookup(client_no_worker, "https://example.com/video").json()["job"]["id"] == done_id
+
+
+def test_lookup_detects_an_existing_file_without_any_job(client_no_worker, download_root) -> None:
+    """Historique purgé, ou même vidéo atteinte par une autre URL : le fichier fait foi."""
+    (download_root / "video.mp4").write_bytes(b"deja la")
+
+    body = _lookup(client_no_worker, "https://autre.example/v", download_root, "video.mp4").json()
+
+    assert body == {"found": True, "reason": "file", "job": None, "file_exists": True}
+
+
+def test_lookup_sanitizes_the_candidate_filename(client_no_worker, download_root) -> None:
+    (download_root / "video.mp4").write_bytes(b"deja la")
+
+    body = _lookup(
+        client_no_worker, "https://autre.example/v", download_root, "  video.mp4 "
+    ).json()
+
+    assert body["file_exists"] is True
+
+
+def test_lookup_answers_no_on_a_destination_outside_the_roots(
+    client_no_worker, download_root, tmp_path
+) -> None:
+    """Une destination invalide n'est pas une erreur ici : la création du job la refusera."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "video.mp4").write_bytes(b"hors racine")
+
+    body = _lookup(client_no_worker, "https://autre.example/v", outside, "video.mp4").json()
+
+    assert body == {"found": False, "reason": None, "job": None, "file_exists": False}
+
+
+def test_lookup_requires_authentication(client_no_worker) -> None:
+    assert (
+        client_no_worker.get("/api/jobs/lookup", params={"url": "https://x/y"}).status_code == 401
+    )
