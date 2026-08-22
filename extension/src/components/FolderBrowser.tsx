@@ -7,9 +7,47 @@
 
 import { type FormEvent, useState } from 'react';
 import { formatFreeSpace } from '@/src/lib/format';
-import { hasParentNavigation, listSubfolders, parentNavigationTarget } from '@/src/lib/folders';
+import { buildBreadcrumb, listSubfolders } from '@/src/lib/folders';
 import type { FoldersResponse } from '@/src/lib/types';
 import type { FolderBrowserState } from '@/src/hooks/useFolderBrowser';
+
+interface FolderBreadcrumbProps {
+  folders: FoldersResponse;
+  onNavigate: (path?: string) => void;
+}
+
+/**
+ * Fil d'Ariane cliquable : remonter d'un ou plusieurs niveaux d'un seul geste, comme dans un
+ * explorateur de fichiers. Il remplace les anciens items « ‹ Toutes les racines » et
+ * « .. (dossier parent) », qui se noyaient au milieu des sous-dossiers.
+ */
+function FolderBreadcrumb({ folders, onNavigate }: FolderBreadcrumbProps) {
+  const segments = buildBreadcrumb(folders);
+  if (segments.length === 0) return null;
+
+  return (
+    <nav className="folder-breadcrumb" aria-label="Chemin du dossier">
+      <ol className="folder-breadcrumb-list">
+        {segments.map((segment, index) => {
+          const isCurrent = index === segments.length - 1;
+          return (
+            <li key={segment.path ?? '__roots__'} className="folder-breadcrumb-item">
+              {isCurrent ? (
+                <span className="folder-breadcrumb-current" aria-current="location">
+                  {segment.label}
+                </span>
+              ) : (
+                <button type="button" className="folder-breadcrumb-link" onClick={() => onNavigate(segment.path ?? undefined)}>
+                  {segment.label}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
 
 interface FolderBrowseListProps {
   folders: FoldersResponse;
@@ -51,18 +89,6 @@ export function FolderBrowseList({ folders, onNavigate }: FolderBrowseListProps)
 
   return (
     <ul className="folder-browser-list">
-      <li>
-        <button type="button" className="folder-browser-item folder-browser-item-breadcrumb" onClick={() => onNavigate(undefined)}>
-          ‹ Toutes les racines
-        </button>
-      </li>
-      {hasParentNavigation(folders) ? (
-        <li>
-          <button type="button" className="folder-browser-item" onClick={() => onNavigate(parentNavigationTarget(folders))}>
-            .. (dossier parent)
-          </button>
-        </li>
-      ) : null}
       {subfolders.length === 0 ? (
         <li className="folder-browser-empty">Aucun sous-dossier.</li>
       ) : (
@@ -155,8 +181,10 @@ export function FolderBrowserPanel({ state, primaryActionLabel, onSelectCurrent 
   const { folders, loading, error, creating, createError, open, close, createFolder } = state;
   const current = folders?.current ?? null;
 
+  // Pas de `role="dialog"` ici : ce panneau est rendu en ligne dans la page d'options. C'est son
+  // hôte (l'overlay de la popup) qui porte le rôle de dialogue quand il y en a un.
   return (
-    <div className="folder-browser" role="dialog" aria-label="Parcourir les dossiers du serveur">
+    <div className="folder-browser">
       {loading ? (
         <p className="folder-browser-status" role="status">
           Chargement…
@@ -169,7 +197,7 @@ export function FolderBrowserPanel({ state, primaryActionLabel, onSelectCurrent 
       ) : null}
       {folders && !loading ? (
         <>
-          <p className="folder-browser-current">{current?.label ?? 'Racines disponibles'}</p>
+          <FolderBreadcrumb folders={folders} onNavigate={open} />
           {current ? <p className="folder-browser-space">{formatFreeSpace(current.free_bytes, current.total_bytes)}</p> : null}
           <FolderBrowseList folders={folders} onNavigate={open} />
           {current ? <NewFolderForm creating={creating} error={createError} onCreate={createFolder} /> : null}

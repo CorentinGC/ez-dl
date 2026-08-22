@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { creationParentPath, hasParentNavigation, listSubfolders, parentNavigationTarget } from './folders';
+import { buildBreadcrumb, creationParentPath, listSubfolders } from './folders';
 import type { FoldersResponse } from './types';
 
 const ROOTS_VIEW: FoldersResponse = {
@@ -19,11 +19,13 @@ const TOP_OF_ROOT: FoldersResponse = {
   parent: null,
 };
 
+// Le serveur renvoie ici `label: 'Films'` (le label de la RACINE) pour un dossier imbriqué :
+// le fil d'Ariane doit donc dériver ses libellés du chemin, pas de `current.label`.
 const NESTED_FOLDER: FoldersResponse = {
   roots: ROOTS_VIEW.roots,
-  current: { path: '/data/films/Action', label: 'Action', free_bytes: 1000, total_bytes: 2000 },
+  current: { path: '/data/films/Action/2024', label: 'Films', free_bytes: 1000, total_bytes: 2000 },
   entries: [],
-  parent: '/data/films',
+  parent: '/data/films/Action',
 };
 
 describe('listSubfolders', () => {
@@ -36,33 +38,71 @@ describe('listSubfolders', () => {
   });
 });
 
-describe('parentNavigationTarget', () => {
-  it('retourne undefined si aucun dossier courant (liste des racines) ou folders absent', () => {
-    expect(parentNavigationTarget(null)).toBeUndefined();
-    expect(parentNavigationTarget(ROOTS_VIEW)).toBeUndefined();
+describe('buildBreadcrumb', () => {
+  it('ne produit rien tant qu\'aucun listing n\'est chargé', () => {
+    expect(buildBreadcrumb(null)).toEqual([]);
   });
 
-  it('retourne undefined au premier niveau d\'une racine (parent serveur = null)', () => {
-    expect(parentNavigationTarget(TOP_OF_ROOT)).toBeUndefined();
+  it('affiche le seul segment « Racines » sur la liste des racines', () => {
+    expect(buildBreadcrumb(ROOTS_VIEW)).toEqual([{ label: 'Racines', path: null }]);
   });
 
-  it('retourne le chemin parent renvoyé par le serveur pour un dossier imbriqué', () => {
-    expect(parentNavigationTarget(NESTED_FOLDER)).toBe('/data/films');
-  });
-});
-
-describe('hasParentNavigation', () => {
-  it('est faux sans dossier courant', () => {
-    expect(hasParentNavigation(null)).toBe(false);
-    expect(hasParentNavigation(ROOTS_VIEW)).toBe(false);
+  it('ajoute la racine ouverte, avec son libellé serveur', () => {
+    expect(buildBreadcrumb(TOP_OF_ROOT)).toEqual([
+      { label: 'Racines', path: null },
+      { label: 'Films', path: '/data/films' },
+    ]);
   });
 
-  it('est faux au premier niveau d\'une racine (pas de parent autorisé)', () => {
-    expect(hasParentNavigation(TOP_OF_ROOT)).toBe(false);
+  it('cumule les chemins des sous-dossiers et ignore current.label', () => {
+    expect(buildBreadcrumb(NESTED_FOLDER)).toEqual([
+      { label: 'Racines', path: null },
+      { label: 'Films', path: '/data/films' },
+      { label: 'Action', path: '/data/films/Action' },
+      { label: '2024', path: '/data/films/Action/2024' },
+    ]);
   });
 
-  it('est vrai pour un dossier imbriqué avec parent connu', () => {
-    expect(hasParentNavigation(NESTED_FOLDER)).toBe(true);
+  it('s\'ancre sur la première racine qui contient le dossier courant', () => {
+    const nestedRoots: FoldersResponse = {
+      ...NESTED_FOLDER,
+      roots: [
+        { label: 'Données', path: '/data', is_available: true, free_bytes: null, total_bytes: null },
+        { label: 'Films', path: '/data/films', is_available: true, free_bytes: null, total_bytes: null },
+      ],
+      current: { path: '/data/films/Action', label: 'Données', free_bytes: null, total_bytes: null },
+    };
+    expect(buildBreadcrumb(nestedRoots)).toEqual([
+      { label: 'Racines', path: null },
+      { label: 'Données', path: '/data' },
+      { label: 'films', path: '/data/films' },
+      { label: 'Action', path: '/data/films/Action' },
+    ]);
+  });
+
+  it('n\'insère pas de double slash sous une racine « / »', () => {
+    const slashRoot: FoldersResponse = {
+      roots: [{ label: 'Disque', path: '/', is_available: true, free_bytes: null, total_bytes: null }],
+      current: { path: '/downloads', label: 'Disque', free_bytes: null, total_bytes: null },
+      entries: [],
+      parent: '/',
+    };
+    expect(buildBreadcrumb(slashRoot)).toEqual([
+      { label: 'Racines', path: null },
+      { label: 'Disque', path: '/' },
+      { label: 'downloads', path: '/downloads' },
+    ]);
+  });
+
+  it('n\'invente aucun segment pour un dossier hors des racines connues', () => {
+    const orphan: FoldersResponse = {
+      ...NESTED_FOLDER,
+      current: { path: '/ailleurs/videos', label: 'Ailleurs', free_bytes: null, total_bytes: null },
+    };
+    expect(buildBreadcrumb(orphan)).toEqual([
+      { label: 'Racines', path: null },
+      { label: 'Ailleurs', path: '/ailleurs/videos' },
+    ]);
   });
 });
 
@@ -74,6 +114,6 @@ describe('creationParentPath', () => {
 
   it('retourne le chemin du dossier courant une fois entré dans une racine', () => {
     expect(creationParentPath(TOP_OF_ROOT)).toBe('/data/films');
-    expect(creationParentPath(NESTED_FOLDER)).toBe('/data/films/Action');
+    expect(creationParentPath(NESTED_FOLDER)).toBe('/data/films/Action/2024');
   });
 });

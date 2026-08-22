@@ -6,10 +6,12 @@
  * centrage y est correct, mais le rendu diffère entre Chrome et les navigateurs dérivés, et
  * l'élément échappe au conteneur `.popup-root` qui porte le thème. Un overlay classique reste
  * prévisible ici, à condition de reproduire à la main ce que `showModal()` offre : `aria-modal`,
- * focus initial, fermeture à `Escape`, piège à focus.
+ * focus initial, fermeture à `Escape`, piège à focus — c'est le rôle de `useModalFocus`, partagé
+ * avec le navigateur de dossiers en plein écran.
  */
 
-import { type KeyboardEvent, useCallback, useEffect, useId, useRef } from 'react';
+import { useId } from 'react';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 export interface ConfirmAction {
   label: string;
@@ -27,50 +29,13 @@ interface ConfirmDialogProps {
   dismissLabel?: string;
 }
 
-/** Éléments focusables de la modale, dans l'ordre du DOM (uniquement des boutons ici). */
-function focusableButtons(root: HTMLElement | null): HTMLButtonElement[] {
-  return root ? Array.from(root.querySelectorAll('button')) : [];
-}
-
 export function ConfirmDialog({ title, message, actions, onDismiss, dismissLabel = 'Annuler' }: ConfirmDialogProps) {
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const { panelRef, onKeyDown } = useModalFocus<HTMLDivElement>(onDismiss);
   const titleId = useId();
   const messageId = useId();
 
-  // Le focus part sur la première action : sans ça il reste sur le bouton « Supprimer » de la
-  // ligne, derrière l'overlay, et la modale est invisible au clavier comme au lecteur d'écran.
-  useEffect(() => {
-    focusableButtons(panelRef.current)[0]?.focus();
-  }, []);
-
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onDismiss();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      // Piège à focus : sans lui, Tab sort de la modale et laisse activer les boutons du
-      // fond, dont celui qui vient d'ouvrir cette confirmation.
-      const buttons = focusableButtons(panelRef.current);
-      const first = buttons.at(0);
-      const last = buttons.at(-1);
-      if (!first || !last) return;
-      const target = document.activeElement;
-      if (event.shiftKey && target === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && target === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    },
-    [onDismiss],
-  );
-
   return (
-    <div className="dialog-backdrop" onMouseDown={onDismiss} onKeyDown={handleKeyDown}>
+    <div className="dialog-backdrop" onMouseDown={onDismiss} onKeyDown={onKeyDown}>
       <div
         className="dialog"
         role="dialog"

@@ -149,6 +149,25 @@ profile exists); full management — creation by duplication, rename, deletion �
 options page. That page edits the **selected** profile, which is not necessarily the active one:
 a new server can be configured end to end without the popup switching over to it.
 
+#### Picking the destination folder
+
+`src/components/FolderBrowser.tsx` (state in `src/hooks/useFolderBrowser.ts`) is shared between the
+popup and the options page; only its presentation differs. In the popup it is mounted inside a
+**full-screen overlay** (`entrypoints/popup/components/FolderBrowserOverlay.tsx`): picking a
+destination requires seeing many entries, which the width of a card did not allow. Since Chrome
+sizes the popup window from the **document flow**, a `position: fixed` overlay does not grow it on
+its own: `body:has(.folder-overlay-backdrop) { min-height: … }` takes care of that. In the options
+page, the very same panel stays rendered inline.
+
+Navigation goes through a clickable **breadcrumb** (`buildBreadcrumb`, `src/lib/folders.ts`), which
+replaces the former "‹ Toutes les racines" and ".." entries buried in the list. It is built
+client-side from `roots[]` and `current.path`, and its intermediate labels are derived from the
+**path**: for a nested folder the server returns the *root*'s label in `current.label`, not the
+open folder's. No segment ever points above an allowed root — the server would answer `400`.
+
+Files are never shown: `/api/folders` returns every entry, `listSubfolders` keeps only `is_dir` —
+a download destination is always a directory.
+
 ## API contract
 
 All routes are prefixed with `/api`. Authentication required (`Authorization: Bearer

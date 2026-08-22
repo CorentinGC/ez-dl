@@ -4,7 +4,7 @@
  * rendu est délégué à `src/components/FolderBrowser.tsx`.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { ApiClient } from '@/src/lib/api';
 import { creationParentPath } from '@/src/lib/folders';
 import type { FoldersResponse } from '@/src/lib/types';
@@ -35,18 +35,28 @@ export function useFolderBrowser(apiClient: ApiClient, options: UseFolderBrowser
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // Deux navigations rapprochées peuvent revenir dans le désordre : seule la dernière demandée
+  // a le droit d'écrire l'état, sinon l'affichage retombe sur le dossier précédent.
+  const requestIdRef = useRef(0);
 
   const open = useCallback(
     (path?: string) => {
+      const requestId = (requestIdRef.current += 1);
       setBrowsing(true);
       setLoading(true);
       setError(null);
       setCreateError(null); // Navigation : on quitte le contexte de l'éventuelle erreur de création précédente.
       apiClient
         .listFolders(path)
-        .then((result) => setFolders(result))
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Erreur de chargement.'))
-        .finally(() => setLoading(false));
+        .then((result) => {
+          if (requestIdRef.current === requestId) setFolders(result);
+        })
+        .catch((err: unknown) => {
+          if (requestIdRef.current === requestId) setError(err instanceof Error ? err.message : 'Erreur de chargement.');
+        })
+        .finally(() => {
+          if (requestIdRef.current === requestId) setLoading(false);
+        });
     },
     [apiClient],
   );

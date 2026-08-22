@@ -54,6 +54,13 @@ body {
   color: var(--ez-text);
 }
 
+/* Chrome dimensionne la fenêtre de popup sur le flux du document : un overlay `position: fixed`
+   ne l'agrandit pas, il serait tronqué à la hauteur du contenu de dessous. On force donc la
+   hauteur du document tant que le navigateur de dossiers est ouvert. */
+body:has(.folder-overlay-backdrop) {
+  min-height: 560px;
+}
+
 button,
 input,
 select {
@@ -397,13 +404,93 @@ select {
   gap: 4px;
 }
 
-.folder-browser {
-  margin-top: 6px;
-  border: 1px solid var(--ez-border);
+/* Navigateur de dossiers en plein écran de popup */
+.folder-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.folder-overlay {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px 12px;
   border-radius: var(--ez-radius);
-  padding: 8px;
   background: var(--ez-bg);
-  max-height: 200px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.folder-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.folder-overlay-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Fil d'Ariane : remonter de plusieurs niveaux d'un geste, comme dans un explorateur. */
+.folder-breadcrumb-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.folder-breadcrumb-item + .folder-breadcrumb-item::before {
+  content: '›';
+  margin: 0 4px 0 2px;
+  color: var(--ez-text-muted);
+}
+
+.folder-breadcrumb-item {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.folder-breadcrumb-link,
+.folder-breadcrumb-current {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-breadcrumb-link {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ez-accent);
+}
+
+.folder-breadcrumb-link:hover {
+  background: var(--ez-bg-hover);
+}
+
+.folder-breadcrumb-current {
+  padding: 2px 4px;
+  font-weight: 600;
+}
+
+.folder-browser {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -414,18 +501,13 @@ select {
   color: var(--ez-text-muted);
 }
 
-.folder-browser-current {
-  margin: 0;
-  font-weight: 600;
-  font-size: 12px;
-}
-
 .folder-browser-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  max-height: 120px;
 }
 
 .folder-browser-item {
@@ -437,9 +519,10 @@ select {
   text-align: left;
   border: none;
   background: transparent;
-  padding: 5px 6px;
+  padding: 4px 6px;
   border-radius: 6px;
   cursor: pointer;
+  font-size: 13px;
   color: var(--ez-text);
 }
 
@@ -467,11 +550,6 @@ select {
   font-size: 11px;
   color: var(--ez-text-muted);
   white-space: nowrap;
-}
-
-.folder-browser-item-breadcrumb {
-  font-weight: 600;
-  color: var(--ez-accent);
 }
 
 .folder-browser-empty {
@@ -511,6 +589,8 @@ select {
 .folder-browser-actions {
   display: flex;
   gap: 8px;
+  /* Colle les actions en bas de l'overlay, quelle que soit la longueur de la liste. */
+  margin-top: auto;
 }
 
 /* Jobs */

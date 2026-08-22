@@ -14,7 +14,7 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   destination `/etc` refusée en 400, démarrage normal (génération auto du mot de passe si absent).
 - **Extension** : sniffer `background.ts`, popup (sources, qualité, renommage, dossier, preset,
   jobs en SSE + pause/reprise/retry, sélecteur de serveur), options (profils multi-serveurs),
-  content script picker. `compile` OK, **151 tests Vitest** verts.
+  content script picker. `compile` OK, **152 tests Vitest** verts.
   Manifest MV3 : `webRequest, storage, tabs, activeTab, cookies, scripting` + `<all_urls>`.
 - **Infra** : Dockerfile multi-stage non-root, `docker-compose.yml` (+ override GPU), CI GitHub
   Actions, Makefile. `docker compose config` validé.
@@ -80,7 +80,10 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       l'en-tête de la popup, section « Serveurs » dans les options (création par duplication),
       invalidation du cache de règles du background au changement de serveur effectif.
       151 tests Vitest, red-green vérifié par mutation. 2026-08-22.
-- [ ] `ez-dl-8hm` : sélecteur de dossier en overlay plein écran + fil d'Ariane (en cours).
+- [x] `ez-dl-8hm` : sélecteur de dossier revu — overlay plein écran de popup (focus trap partagé
+      avec `ConfirmDialog` via `useModalFocus`), fil d'Ariane cliquable (`buildBreadcrumb`) à la
+      place des items « racines » / « .. », police des items réduite, course de `open()` corrigée,
+      réouverture du navigateur réparée. 152 tests Vitest. 2026-08-22.
 
 ## Décisions récentes (2026-08-21)
 
@@ -215,6 +218,11 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   la ligne de façon optimiste après une annulation la fait réapparaître par SSE, ce qui donnait
   l'impression que « Annuler » ne faisait rien. Le fichier téléchargé n'est **jamais** effacé par
   défaut : il faut `?delete_file=true` (modale de confirmation côté popup, `ez-dl-f4z`).
+- **Un overlay `position: fixed` n'agrandit pas la popup Chrome** : la fenêtre est dimensionnée
+  sur le flux du document, donc un panneau fixe est tronqué à la hauteur du contenu de dessous.
+  Forcer `body:has(.mon-overlay) { min-height: … }` (`ez-dl-8hm`).
+- **`current.label` de `/api/folders` est le label de la RACINE**, même pour un dossier imbriqué :
+  le fil d'Ariane dérive ses libellés du **chemin**, jamais de ce champ.
 - **Réglages de l'extension = un seul objet dans `storage.local`** : la clé `settings` porte
   désormais `{version: 2, profiles[], activeProfileId}`. La migration depuis l'ancien format plat
   est **paresseuse** (à la première lecture) et doit rester **déterministe** — identifiant fixe

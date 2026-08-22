@@ -348,10 +348,54 @@ h2 {
   color: var(--ez-text-muted);
 }
 
-.folder-browser-current {
+/* Fil d'Ariane (mêmes règles que la popup, feuilles séparées par surface). */
+.folder-breadcrumb-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
   margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.folder-breadcrumb-item {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.folder-breadcrumb-item + .folder-breadcrumb-item::before {
+  content: '\203A';
+  margin: 0 4px 0 2px;
+  color: var(--ez-text-muted);
+}
+
+.folder-breadcrumb-link,
+.folder-breadcrumb-current {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-breadcrumb-link {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--ez-accent);
+}
+
+.folder-breadcrumb-link:hover {
+  background: var(--ez-bg-hover);
+}
+
+.folder-breadcrumb-current {
+  padding: 2px 4px;
   font-weight: 600;
-  font-size: 12px;
 }
 
 .folder-browser-list {
@@ -401,11 +445,6 @@ h2 {
   font-size: 11px;
   color: var(--ez-text-muted);
   white-space: nowrap;
-}
-
-.folder-browser-item-breadcrumb {
-  font-weight: 600;
-  color: var(--ez-accent);
 }
 
 .folder-browser-empty {

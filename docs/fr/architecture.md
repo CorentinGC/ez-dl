@@ -149,6 +149,26 @@ profil existe) ; la gestion complète — création par duplication, renommage, 
 la page d'options. Cette page édite le profil **sélectionné**, qui n'est pas forcément l'actif :
 un nouveau serveur se configure de bout en bout sans que la popup bascule dessus.
 
+#### Choix du dossier de destination
+
+`src/components/FolderBrowser.tsx` (état dans `src/hooks/useFolderBrowser.ts`) est partagé entre la
+popup et les options ; seule sa présentation diffère. Dans la popup il est monté dans un **overlay
+plein écran** (`entrypoints/popup/components/FolderBrowserOverlay.tsx`) : le choix d'une destination
+demande de voir beaucoup d'entrées, ce que la largeur d'une carte ne permettait pas. La fenêtre de
+popup étant dimensionnée par Chrome sur le **flux du document**, un overlay `position: fixed` ne
+l'agrandit pas de lui-même : `body:has(.folder-overlay-backdrop) { min-height: … }` s'en charge.
+Dans les options, le même panneau reste rendu en ligne.
+
+La navigation se fait par un **fil d'Ariane** cliquable (`buildBreadcrumb`, `src/lib/folders.ts`),
+qui remplace les anciennes entrées « ‹ Toutes les racines » et « .. » noyées dans la liste. Il est
+construit côté client à partir de `roots[]` et de `current.path`, et ses libellés intermédiaires
+sont dérivés du **chemin** : pour un dossier imbriqué, le serveur renvoie dans `current.label` le
+label de la *racine*, pas celui du dossier ouvert. Aucun segment ne pointe au-dessus d'une racine
+autorisée — le serveur répondrait `400`.
+
+Les fichiers ne sont jamais affichés : `/api/folders` renvoie toutes les entrées, `listSubfolders`
+ne garde que `is_dir` — une destination de téléchargement est toujours un dossier.
+
 ## Contrat d'API
 
 Toutes les routes sont préfixées par `/api`. Authentification obligatoire (`Authorization: Bearer

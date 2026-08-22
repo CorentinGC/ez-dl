@@ -11,19 +11,50 @@ export function listSubfolders(entries: FolderEntry[]): FolderEntry[] {
   return entries.filter((entry) => entry.is_dir);
 }
 
-/**
- * Cible de navigation pour le bouton "dossier parent" : `undefined` si aucun dossier n'est ouvert,
- * ou si on est au premier niveau d'une racine (le serveur renvoie alors `parent: null` — il n'y a
- * pas de parent *autorisé*, distinct de "revenir à la liste des racines").
- */
-export function parentNavigationTarget(folders: FoldersResponse | null): string | undefined {
-  if (!folders?.current) return undefined;
-  return folders.parent ?? undefined;
+/** Segment de fil d'Ariane. `path: null` = retour à la liste des racines (`open(undefined)`). */
+export interface BreadcrumbSegment {
+  label: string;
+  path: string | null;
 }
 
-/** Vrai si un raccourci "dossier parent" doit être affiché (on est dans un dossier avec parent connu). */
-export function hasParentNavigation(folders: FoldersResponse | null): boolean {
-  return Boolean(folders?.current) && folders?.parent !== null;
+const ROOTS_LABEL = 'Racines';
+
+/**
+ * Fil d'Ariane du dossier courant : `Racines › <racine> › <sous-dossier> › …`.
+ *
+ * Les libellés intermédiaires sont dérivés du **chemin**, jamais de `current.label` : pour un
+ * dossier imbriqué, le serveur renvoie le label de la *racine* dans `current.label`
+ * (`server/app/api/folders.py`), ce qui afficherait « Films » à tous les niveaux.
+ */
+export function buildBreadcrumb(folders: FoldersResponse | null): BreadcrumbSegment[] {
+  if (!folders) return [];
+  const rootsSegment: BreadcrumbSegment = { label: ROOTS_LABEL, path: null };
+  const current = folders.current;
+  if (!current) return [rootsSegment];
+
+  const root = folders.roots.find((candidate) => isWithinRoot(current.path, candidate.path));
+  // Dossier hors des racines connues : aucun chemin intermédiaire n'est inventé, le serveur
+  // refuserait (400) tout chemin situé au-dessus d'une racine autorisée.
+  if (!root) return [rootsSegment, { label: current.label, path: current.path }];
+
+  const segments: BreadcrumbSegment[] = [rootsSegment, { label: root.label, path: root.path }];
+  // Racine « / » : le préfixe cumulé part vide, sinon chaque segment produirait un `//`.
+  let cumulated = root.path === '/' ? '' : root.path;
+  for (const name of relativeSegments(current.path, root.path)) {
+    cumulated = `${cumulated}/${name}`;
+    segments.push({ label: name, path: cumulated });
+  }
+  return segments;
+}
+
+function isWithinRoot(path: string, rootPath: string): boolean {
+  return path === rootPath || path.startsWith(rootPath === '/' ? '/' : `${rootPath}/`);
+}
+
+function relativeSegments(path: string, rootPath: string): string[] {
+  if (path === rootPath) return [];
+  const prefixLength = rootPath === '/' ? 1 : rootPath.length + 1;
+  return path.slice(prefixLength).split('/').filter(Boolean);
 }
 
 /**
