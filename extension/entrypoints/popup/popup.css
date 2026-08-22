@@ -702,6 +702,17 @@ select {
   color: var(--ez-text-muted);
 }
 
+/* Chemin de destination du job : une seule ligne tronquée, le chemin complet reste en `title`.
+   Pas de troncature à gauche via `direction: rtl` : l'algo bidi réordonne les slashs. */
+.job-row-folder {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--ez-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .job-row-actions {
   display: flex;
   flex-wrap: wrap;

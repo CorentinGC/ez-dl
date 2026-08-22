@@ -152,6 +152,12 @@ function JobRow({
           .join(' · ')}
       </p>
 
+      {/* Destination visible sur chaque ligne : un job « Terminé » sans son dossier oblige
+          l'utilisateur à deviner où le fichier est parti (vécu avec une destination `@eaDir`). */}
+      <p className="job-row-folder" title={job.folder}>
+        {job.folder}
+      </p>
+
       {job.error ? (
         <p className="field-error" role="alert">
           {job.error}
