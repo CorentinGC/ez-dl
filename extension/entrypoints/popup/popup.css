@@ -100,9 +100,18 @@ select {
 
 .popup-brand,
 .popup-brand-standalone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
   font-size: 15px;
   letter-spacing: -0.01em;
+}
+
+/* La marque ne doit ni s'étirer ni se comprimer quand le sélecteur de serveur pousse la ligne. */
+.brand-mark {
+  display: block;
+  flex: none;
 }
 
 /* Sélecteur de serveur actif : largeur bornée pour ne pas écraser les onglets. */

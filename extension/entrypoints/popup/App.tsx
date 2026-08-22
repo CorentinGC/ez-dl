@@ -5,6 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { createApiClient, toApiConfig } from '@/src/lib/api';
+import { BrandMark } from '@/src/components/BrandMark';
 import { EmptyState } from './components/EmptyState';
 import { Header, type PopupView } from './components/Header';
 import { JobsView } from './components/JobsView';
@@ -43,7 +44,10 @@ export default function App() {
   if (!settings || !configured) {
     return (
       <div className="popup-root popup-root-centered">
-        <span className="popup-brand popup-brand-standalone">ez-dl</span>
+        <span className="popup-brand popup-brand-standalone">
+          <BrandMark size={20} />
+          ez-dl
+        </span>
         {/* Sélecteur présent ici aussi : basculé sur un profil vide, il reste la seule porte
             de sortie vers un serveur déjà configuré. */}
         <ProfileSelect profiles={profiles} activeProfileId={activeProfileId} onSelect={(id) => void selectProfile(id)} />

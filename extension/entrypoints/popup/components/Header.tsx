@@ -2,6 +2,7 @@
  * En-tête de la popup : marque, serveur actif, onglets Sources/Jobs, accès rapide aux réglages.
  */
 
+import { BrandMark } from '@/src/components/BrandMark';
 import { ProfileSelect } from './ProfileSelect';
 import type { ServerProfile } from '@/src/lib/types';
 
@@ -20,7 +21,10 @@ interface HeaderProps {
 export function Header({ activeView, onChangeView, sourceCount, jobCount, profiles, activeProfileId, onSelectProfile }: HeaderProps) {
   return (
     <header className="popup-header">
-      <span className="popup-brand">ez-dl</span>
+      <span className="popup-brand">
+        <BrandMark />
+        ez-dl
+      </span>
       <ProfileSelect profiles={profiles} activeProfileId={activeProfileId} onSelect={onSelectProfile} />
       <nav className="popup-tabs" role="tablist" aria-label="Sections de la popup">
         <TabButton label="Sources" count={sourceCount} active={activeView === 'sources'} onClick={() => onChangeView('sources')} />
