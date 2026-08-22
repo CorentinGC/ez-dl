@@ -21,9 +21,7 @@ _LEFTOVER_SUFFIXES = (".part", ".ytdl", ".temp")
 
 # Un dossier de travail porte l'identifiant (uuid4) de son job : tout le reste de
 # `EZDL_TEMP_DIR` appartient à quelqu'un d'autre et ne doit pas être touché.
-_JOB_DIR_PATTERN = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-)
+_JOB_DIR_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 # Au-delà, c'est que quelque chose tourne en rond : mieux vaut échouer que boucler.
 _MAX_DEDUPE_ATTEMPTS = 999

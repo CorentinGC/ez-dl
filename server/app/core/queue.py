@@ -355,9 +355,7 @@ class JobQueue:
                 self._handle_phase_failure(session, job, exc, "téléchargement")
                 return None
 
-    def _handle_phase_failure(
-        self, session: Session, job: Job, exc: Exception, phase: str
-    ) -> None:
+    def _handle_phase_failure(self, session: Session, job: Job, exc: Exception, phase: str) -> None:
         """Traduit l'échec d'une phase en statut final : annulation, pause ou erreur.
 
         Un SIGTERM/SIGKILL volontaire fait échouer la phase comme n'importe quelle panne :
@@ -374,9 +372,7 @@ class JobQueue:
             self._update_job(session, job, status=JobStatus.PAUSED, speed=None, eta=None)
             return
         logger.warning("Échec %s job %s : %s", phase, job_id, exc)
-        self._update_job(
-            session, job, status=JobStatus.ERROR, error=str(exc), speed=None, eta=None
-        )
+        self._update_job(session, job, status=JobStatus.ERROR, error=str(exc), speed=None, eta=None)
 
     async def _convert_phase(
         self, session: Session, job: Job, temp_path: Path, work_dir: Path
@@ -425,9 +421,7 @@ class JobQueue:
     def _destination_or_error(self, session: Session, job: Job) -> Path | None:
         """Résout la destination du job, ou passe le job en erreur et retourne `None`."""
         try:
-            return resolve_destination(
-                job.folder, job.filename or job.url, self._settings.roots
-            )
+            return resolve_destination(job.folder, job.filename or job.url, self._settings.roots)
         except PathSecurityError as exc:
             self._update_job(session, job, status=JobStatus.ERROR, error=str(exc))
             return None

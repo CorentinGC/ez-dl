@@ -109,9 +109,7 @@ async def get_job(job_id: str, session: Session = Depends(get_session)) -> Job:
 
 
 @router.post("/jobs/{job_id}/pause", response_model=JobOut)
-async def pause_job(
-    job_id: str, request: Request, session: Session = Depends(get_session)
-) -> Job:
+async def pause_job(job_id: str, request: Request, session: Session = Depends(get_session)) -> Job:
     """Suspend un job en attente ou en cours de téléchargement.
 
     Le fichier partiel est conservé : la reprise repart de là plutôt que du début.
