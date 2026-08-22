@@ -113,8 +113,16 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
       ou `EZDL_EXTENSION_DIST_DIR`, `.env`/`.git` exclus du contexte de build de l'extension.
       La page et `/extension/version` publient désormais l'identifiant Chrome attendu et le
       SHA-256 du `.crx` (seul moyen de détecter un artefact substitué).
-      **Reste à faire : l'installation réelle par glisser-déposer dans Chrome n'a pas été
-      testée** (geste manuel, non automatisable).
+
+- [x] `ez-dl-esb` : **le glisser-déposer du `.crx` est impossible, pas seulement non testé.**
+      Chrome répond « Package incorrect CRX_REQUIRED_PROOF_MISSING » : sur ce chemin `VerifyCrx3`
+      exige une preuve d'éditeur du Chrome Web Store, et le mode développeur n'y change rien.
+      La voie documentée devient donc le **zip + « Charger l'extension non empaquetée »**
+      (page `/extension`, ADR 0004 amendée, `docs/{fr,en}/setup.md`, `architecture.md`, README×2).
+      Le `.crx` reste servi : c'est l'artefact d'une installation par **politique système**, seul
+      chemin où Chrome vérifie une extension hors Web Store sans preuve d'éditeur — suite dans
+      `ez-dl-upc` (`/extension/update.xml` + `update_url` + politiques par OS). 153 tests pytest.
+      2026-08-22.
 
 ## Décisions récentes (2026-08-21)
 
@@ -292,6 +300,16 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
   `"CRX3 SignedData\x00"` + taille + `signed_header_data` + archive. L'identifiant est le SHA-256
   de la clé publique DER tronqué à 16 octets, transcrit dans l'alphabet `a`-`p`. Vérifiable sans
   Chrome avec `crx3-utils` (`crx3-info`, `crx3-verify`).
+- **Un `.crx` auto-signé ne s'installe JAMAIS par glisser-déposer** — même valide, même en mode
+  développeur. Chrome répond « Package incorrect CRX_REQUIRED_PROOF_MISSING » : sur ce chemin,
+  `VerifyCrx3` réclame `CRX3_WITH_PUBLISHER_PROOF`, une signature que seul le Chrome Web Store
+  produit. Les deux seules voies hors Store sont le **zip chargé non empaqueté** (identifiant
+  dérivé du CHEMIN du dossier, pas de la clé) et l'**installation par politique système**
+  (vérifiée en `VerifierFormat::CRX3`, sans preuve d'éditeur, avec auto-update depuis un
+  `update.xml` auto-hébergé). Une politique doit être de niveau *mandatory* : HKLM sur Windows,
+  `/etc/opt/chrome/policies/managed/` sur Linux, et sur macOS un plist dans
+  `/Library/Managed Preferences/` — un `defaults write` en domaine utilisateur ne suffit pas.
+  Piège documentaire : ne jamais réécrire « glisser le `.crx` sur `chrome://extensions` ».
 - **`EZDL_EXTENSION_DIST_DIR` est une entrée non fiable, pas une donnée du code** : son contenu
   vient d'un contexte de build (fork, PR, CI). Le serveur signe le zip qu'il y trouve avec sa clé
   persistante — un zip substitué produirait un `.crx` au MÊME identifiant Chrome, donc une mise à

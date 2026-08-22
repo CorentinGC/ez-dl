@@ -1,7 +1,22 @@
 # ADR 0004 — Distribution de l'extension en `.crx` signé par le serveur
 
-- **Statut** : acceptée
+- **Statut** : acceptée, **amendée le 2026-08-22** (voir « Amendement » ci-dessous)
 - **Date** : 2026-08-22
+
+## Amendement — le `.crx` ne s'installe pas par glisser-déposer
+
+La décision initiale reposait sur une prémisse **fausse** : que déposer un `.crx` auto-signé sur
+`chrome://extensions`, mode développeur activé, installerait l'extension. Chrome refuse ce geste
+avec « Package incorrect CRX_REQUIRED_PROOF_MISSING » : sur ce chemin, `VerifyCrx3` exige une
+preuve d'éditeur produite par le seul Chrome Web Store, et le mode développeur n'y change rien.
+Vérifié en conditions réelles sur le serveur déployé.
+
+Ce qui change : la **voie documentée est le zip** (`/extension/zip`) + « Charger l'extension non
+empaquetée ». Ce qui reste : toute la chaîne de signature. Le `.crx` produit est valide et
+constitue précisément l'artefact qu'une installation par **politique système** consomme — c'est
+le seul chemin où Chrome vérifie une extension hors Web Store sans preuve d'éditeur. La signature
+à l'exécution, la clé persistée et l'identifiant stable gardent donc leur raison d'être, et
+`ez-dl-upc` devient la suite naturelle plutôt qu'un simple confort.
 
 ## Contexte
 
@@ -21,11 +36,13 @@ distribuer le client qui lui correspond.
 Le serveur **publie l'extension empaquetée** sur quatre routes **publiques** (sans mot de passe) :
 
 - `GET /extension` — page HTML d'installation : versions de l'extension et du serveur, bouton de
-  téléchargement, trois étapes d'installation, lien secondaire vers le zip.
+  téléchargement du zip, étapes d'installation, SHA-256 de l'archive, et un bloc secondaire sur le
+  paquet signé.
+- `GET /extension/zip` — le zip de l'extension, artefact de la voie recommandée (« Charger
+  l'extension non empaquetée »). `404` explicite si l'image ne contient pas l'artefact.
 - `GET /extension/download` — archive `.crx` signée (`application/x-chrome-extension`, nommée
-  `ez-dl-extension-<version>.crx`). `404` explicite si l'image ne contient pas l'artefact.
-- `GET /extension/zip` — le zip brut, pour la voie « Charger l'extension non empaquetée »
-  (développement). `404` dans les mêmes conditions.
+  `ez-dl-extension-<version>.crx`), destinée à l'installation par politique système. `404` dans
+  les mêmes conditions, `503` si la signature échoue.
 - `GET /extension/version` — JSON `{available, version, filename, size}`. Renvoie
   `200 {"available": false, "version": null, ...}` en l'absence d'artefact — **jamais `404`** sur
   cette route, qui est consommée par la popup pour signaler une mise à jour disponible.
@@ -52,10 +69,11 @@ routes `/extension*` constituent une seconde exception, assumée pour trois rais
 
 ## Alternatives considérées
 
-- **Distribuer le zip seul** : écarté comme voie principale — il impose de dézipper l'archive et de
-  **conserver** le dossier extrait (Chrome charge une extension non empaquetée depuis son dossier
-  source ; le supprimer casse l'extension). Le zip reste néanmoins publié sur `/extension/zip`,
-  comme voie secondaire pour le développement.
+- **Distribuer le zip seul** : écarté comme voie principale au moment de la décision — il impose
+  de dézipper l'archive et de **conserver** le dossier extrait (Chrome charge une extension non
+  empaquetée depuis son dossier source ; le supprimer casse l'extension). *L'amendement ci-dessus
+  inverse ce choix : cette friction est le prix à payer, le `.crx` n'étant pas installable
+  manuellement.*
 - **Chrome Web Store** : écarté — compte développeur payant, revue à chaque version publiée, et
   dépendance à un tiers pour distribuer le client d'un serveur auto-hébergé, ce qui contredit la
   logique du projet.
@@ -81,9 +99,12 @@ routes `/extension*` constituent une seconde exception, assumée pour trois rais
 - **Empreintes publiées pour validation.** `GET /extension/version` renvoie deux champs
   supplémentaires : `extension_id` (identifiant Chrome 32 caractères, a-p, dérivé de la clé de
   signature) et `sha256` (empreinte SHA-256 du `.crx` servi). Les deux valent `null` quand le `.crx` ne peut pas
-  être préparé (dossier de données non inscriptible). La page `/extension` affiche ces deux valeurs ;
-  l'utilisateur peut vérifier l'identifiant en ouvrant `chrome://extensions` après installation pour
-  détecter une substitution de l'artefact en chemin.
+  être préparé (dossier de données non inscriptible). La page `/extension` affiche, elle, le SHA-256
+  de l'archive réellement servie et l'identifiant du paquet signé — le premier pour détecter une
+  substitution de l'artefact en chemin, le second parce qu'une extension installée par politique
+  système porte cet identifiant dans `chrome://extensions`. (Une extension chargée non empaquetée
+  reçoit un identifiant dérivé du chemin de son dossier, pas de la clé : l'identifiant publié ne
+  vaut pas pour cette voie.)
 - **Validation de la version publiée.** Le contenu de `extension-version.txt` doit être une version
   strictement numérique (`1`, `1.2`, `1.2.3` ou `1.2.3.4`) ; toute autre forme rejette le fichier,
   et le serveur retombe sur le nom générique `ez-dl-extension.crx` en annonçant `version: null`.
@@ -111,8 +132,14 @@ routes `/extension*` constituent une seconde exception, assumée pour trois rais
 
 ## Limite connue
 
-Chrome n'autorise **aucune installation « en un clic »** depuis une page web hors Chrome Web Store :
-le Mode développeur reste requis, et l'utilisateur doit glisser le `.crx` sur `chrome://extensions`.
-L'installation et la mise à jour silencieuses via politique système (`update.xml` +
-`ExtensionInstallSources` / `ExtensionInstallForcelist`) sont une évolution possible de cette
-décision (issue `ez-dl-upc`) — **non implémentée à ce jour**.
+Hors Chrome Web Store, Chrome n'autorise **aucune installation « en un clic »** depuis une page
+web, et refuse tout paquet signé qui ne vient pas du Store (`CRX_REQUIRED_PROOF_MISSING`). Le
+mode développeur et le chargement non empaqueté restent donc obligatoires pour une installation
+manuelle.
+
+Seule l'installation par **politique système** échappe à cette contrainte : une extension
+installée par politique est vérifiée en `VerifierFormat::CRX3`, sans preuve d'éditeur, et se met
+à jour toute seule depuis un `update.xml` auto-hébergé. Son coût est réel — droits
+d'administration sur chaque poste, et la politique doit être de niveau *mandatory* (sur macOS,
+un plist dans `/Library/Managed Preferences/`, hors de portée d'un `defaults write` utilisateur).
+Suivi par l'issue `ez-dl-upc` — **non implémentée à ce jour**.

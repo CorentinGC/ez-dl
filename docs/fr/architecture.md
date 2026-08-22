@@ -185,8 +185,9 @@ cachés du navigateur, pas interdits.
 #### Publication de l'extension par le serveur
 
 Le serveur distribue l'extension empaquetée, de sorte qu'installer ez-dl sur un nouveau poste ne
-demande ni clone du dépôt ni Node : ouvrir `http://<serveur>:8000/extension`, télécharger le `.crx`,
-le glisser sur `chrome://extensions` (mode développeur activé). La chaîne complète :
+demande ni clone du dépôt ni Node : ouvrir `http://<serveur>:8000/extension`, télécharger le zip, le
+décompresser, puis « Charger l'extension non empaquetée » dans `chrome://extensions` (mode
+développeur activé). La chaîne complète :
 
 ```
 build Docker (stage node:22-slim : npm ci && npm run zip)
@@ -213,8 +214,16 @@ rebuild qui change le zip est republié même si son mtime n'a pas avancé (buil
 restauration de sauvegarde). `GET /extension/version`
 renvoie deux champs supplémentaires : `extension_id` (identifiant Chrome attendu, 32 caractères a-p)
 et `sha256` (empreinte du `.crx` servi) ; les deux valent `null` en cas d'échec de signature. La page
-d'installation affiche ces deux empreintes pour permettre à l'utilisateur de vérifier l'intégrité du
-fichier.
+d'installation affiche le SHA-256 du zip servi et l'identifiant du paquet signé, pour permettre à
+l'utilisateur de vérifier l'intégrité du fichier.
+
+Le `.crx` **n'est pas installable par glisser-déposer** : sur ce chemin Chrome exige une preuve
+d'éditeur du Chrome Web Store et rejette le paquet avec `CRX_REQUIRED_PROOF_MISSING`. Il reste
+publié parce qu'il est l'artefact d'une installation par **politique système**, seul chemin où
+Chrome vérifie une extension hors Web Store sans cette preuve. C'est aussi pourquoi l'identifiant
+stable dérivé de la clé garde son sens : il ne vaut que pour ce chemin, une extension chargée non
+empaquetée recevant un identifiant dérivé du chemin de son dossier. Voir
+[ADR 0004](decisions/0004-distribution-extension-crx.md).
 
 Le dossier `EZDL_EXTENSION_DIST_DIR` (`/app/extension-dist` dans l'image) appartient à `root` : le
 serveur, tournant sous un utilisateur non-root, ne fait que le lire. Motif : le serveur signe le zip
@@ -279,13 +288,15 @@ POST   /api/rules           -> body {domain, url_pattern, label?, notes?, source
 DELETE /api/rules/{id}      -> supprime
 
 GET    /extension           -> page HTML d'installation : versions extension + serveur, bouton de
-                               téléchargement, 3 étapes, identifiant et empreinte SHA-256,
-                               lien secondaire vers le zip                                  [public]
+                               téléchargement du zip, 4 étapes, SHA-256 de l'archive, bloc
+                               secondaire sur le paquet signé                               [public]
+GET    /extension/zip       -> zip de l'extension, artefact de la voie recommandée
+                               (« Charger l'extension non empaquetée ») ; 404 explicite si
+                               l'image ne contient pas l'artefact                           [public]
 GET    /extension/download  -> .crx signé, media type application/x-chrome-extension,
-                               nom ez-dl-extension-<version>.crx ; 404 explicite si l'image
-                               ne contient pas l'artefact                                   [public]
-GET    /extension/zip       -> zip brut (voie « Charger l'extension non empaquetée », dev) ;
-                               404 explicite si l'artefact est absent                       [public]
+                               nom ez-dl-extension-<version>.crx, destiné à l'installation par
+                               politique système — NON installable par glisser-déposer ;
+                               404 explicite si absent, 503 si la signature échoue          [public]
 GET    /extension/version   -> {available, version, filename, size, extension_id, sha256} ;
                                200 {"available": false, "version": null, "extension_id": null,
                                "sha256": null, …} si aucun artefact ou échec de signature

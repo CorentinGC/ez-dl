@@ -135,21 +135,24 @@ Le serveur publie lui-même l'extension empaquetée — aucun clone, aucun Node.
 machine depuis laquelle vous l'installez.
 
 1. Ouvrez `http://<serveur>:8000/extension` (ex. `http://nas.local:8000/extension`) et téléchargez
-   le `.crx`. Cette page est publique, tout comme les routes de téléchargement vers lesquelles elle
+   le `.zip`. Cette page est publique, tout comme les routes de téléchargement vers lesquelles elle
    pointe.
-2. Ouvrez `chrome://extensions` et activez le **mode développeur**.
-3. Glissez le `.crx` téléchargé sur la page.
+2. Décompressez-le dans un dossier **qui restera en place** — Chrome le relit à chaque démarrage.
+3. Ouvrez `chrome://extensions` et activez le **mode développeur**.
+4. Cliquez sur **Charger l'extension non empaquetée** et choisissez le dossier décompressé.
 
-Chrome n'autorise aucune installation en un clic en dehors du Chrome Web Store : le mode
-développeur reste donc nécessaire. La page propose aussi le `.zip` brut si vous préférez
-**Charger l'extension non empaquetée**.
+Chrome n'autorise aucune installation en un clic en dehors du Chrome Web Store, et refuse tout
+paquet signé qui n'en vient pas : déposer un `.crx` sur `chrome://extensions` échoue avec
+« Package incorrect CRX_REQUIRED_PROOF_MISSING », mode développeur ou non. Le `.crx` servi par
+`/extension/download` est destiné à une installation par **politique système**, seul chemin que
+Chrome accepte hors Web Store.
 
 Pour publier une nouvelle version après avoir modifié l'extension, incrémentez `version` dans
-`extension/package.json` puis relancez `docker compose up -d --build` (ou `make publish-extension`).
-Le `.crx` est signé à l'exécution avec une clé stockée dans
-`EZDL_DATA_DIR/extension-signing-key.pem` — gardez ce dossier sur un volume, car Chrome en dérive
-l'identifiant de l'extension et une clé perdue signifie un nouvel identifiant au lieu d'une mise à
-jour.
+`extension/package.json`, relancez `docker compose up -d --build` (ou `make publish-extension`),
+puis remplacez le contenu du dossier décompressé et rechargez l'extension. Le `.crx` est signé à
+l'exécution avec une clé stockée dans `EZDL_DATA_DIR/extension-signing-key.pem` — gardez ce dossier
+sur un volume, car Chrome en dérive l'identifiant de l'extension pour la voie « politique système »,
+et une clé perdue signifie un nouvel identifiant au lieu d'une mise à jour.
 
 **Alternative développeur** — construire l'extension localement et la charger non empaquetée :
 

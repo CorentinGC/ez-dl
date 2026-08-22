@@ -1,5 +1,9 @@
 """Empaquetage CRX3 : transforme le zip de l'extension produit au build en archive `.crx`
-signée, installable par glisser-déposer dans `chrome://extensions`.
+signée, destinée à une installation pilotée par politique système.
+
+Chrome refuse ce paquet en glisser-déposer (`CRX_REQUIRED_PROOF_MISSING` : il y exige une preuve
+d'éditeur du Chrome Web Store) ; la voie manuelle documentée est le zip chargé non empaqueté.
+L'identifiant stable dérivé de la clé ne vaut donc que pour la voie « politique système ».
 
 Format décrit par `components/crx_file/crx3.proto` (Chromium) :
 `"Cr24"` + version (4 octets, little-endian) + taille de l'en-tête (4 octets, little-endian)

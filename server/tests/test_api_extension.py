@@ -166,13 +166,25 @@ def test_version_route_publishes_the_crx_fingerprints(app_client, published):
     )
 
 
-def test_install_page_shows_the_expected_identity_and_digest(app_client, published):
+def test_install_page_leads_with_the_zip_not_the_crx(app_client, published):
+    """Chrome refuse tout `.crx` auto-signé déposé sur `chrome://extensions`
+    (`CRX_REQUIRED_PROOF_MISSING`) : la page ne doit pas proposer ce geste comme voie
+    d'installation."""
+    page = app_client.get("/extension").text
+
+    assert '<a class="download" href="/extension/zip"' in page, "le zip est la voie principale"
+    assert "Charger l'extension non empaquetée" in page
+    assert "CRX_REQUIRED_PROOF_MISSING" in page, "l'échec du glisser-déposer doit être annoncé"
+    assert "Glisser le fichier" not in page
+
+
+def test_install_page_shows_the_zip_digest_and_the_signed_package_identity(app_client, published):
     identity = app_client.get("/extension/version").json()["extension_id"]
 
     page = app_client.get("/extension").text
 
-    assert identity in page, "sans identifiant attendu, une substitution du .crx est indétectable"
-    assert hashlib.sha256(app_client.get("/extension/download").content).hexdigest() in page
+    assert hashlib.sha256(ARCHIVE).hexdigest() in page, "empreinte de l'artefact réellement servi"
+    assert identity in page, "identifiant du paquet signé, pour l'installation par politique"
 
 
 @pytest.mark.parametrize(

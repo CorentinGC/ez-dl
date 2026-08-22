@@ -184,8 +184,9 @@ forbidden.
 #### Extension publishing by the server
 
 The server distributes the packaged extension, so that installing ez-dl on a new machine needs
-neither a clone of the repository nor Node: open `http://<server>:8000/extension`, download the
-`.crx`, drop it onto `chrome://extensions` (developer mode enabled). The full chain:
+neither a clone of the repository nor Node: open `http://<server>:8000/extension`, download the zip,
+unpack it, then "Load unpacked extension" in `chrome://extensions` (developer mode enabled). The
+full chain:
 
 ```
 Docker build (node:22-slim stage: npm ci && npm run zip)
@@ -211,7 +212,16 @@ a rebuild that changes the zip is republished even when its mtime has not moved 
 build, restored backup). `GET /extension/version` returns two
 additional fields: `extension_id` (expected Chrome identifier, 32 characters a-p) and `sha256`
 (fingerprint of the served `.crx`); both are `null` on signature failure. The install page displays
-both fingerprints to let the user verify the file's integrity.
+the served zip's SHA-256 and the signed package's identifier, to let the user verify the file's
+integrity.
+
+The `.crx` **cannot be installed by drag and drop**: on that path Chrome requires a Chrome Web Store
+publisher proof and rejects the package with `CRX_REQUIRED_PROOF_MISSING`. It stays published
+because it is the artifact of a **system-policy** installation, the only path where Chrome verifies
+an extension from outside the Web Store without that proof. That is also why the stable identifier
+derived from the key still matters: it only applies to that path, an extension loaded unpacked
+receiving an identifier derived from its folder path. See
+[ADR 0004](decisions/0004-distribution-extension-crx.md).
 
 The `EZDL_EXTENSION_DIST_DIR` folder (`/app/extension-dist` in the image) is owned by `root` so
 that the server, running as a non-root user, can only read it. Rationale: the server signs the zip
@@ -275,13 +285,16 @@ GET    /api/rules           -> [site_rule]
 POST   /api/rules           -> body {domain, url_pattern, label?, notes?, source:"manual"|"learned"} -> site_rule
 DELETE /api/rules/{id}      -> deletes
 
-GET    /extension           -> HTML install page: extension + server versions, download button,
-                               3 steps, Chrome ID and SHA-256 fingerprint, secondary link to zip [public]
-GET    /extension/download  -> signed .crx, media type application/x-chrome-extension,
-                               named ez-dl-extension-<version>.crx; explicit 404 if the image
-                               does not contain the artifact                                  [public]
-GET    /extension/zip       -> raw zip ("Load unpacked extension" route, dev); explicit 404
-                               if the artifact is missing                                     [public]
+GET    /extension           -> HTML install page: extension + server versions, zip download
+                               button, 4 steps, archive SHA-256, secondary block about the
+                               signed package                                                 [public]
+GET    /extension/zip       -> extension zip, artifact of the recommended route ("Load unpacked
+                               extension"); explicit 404 if the image does not contain the
+                               artifact                                                       [public]
+GET    /extension/download  -> signed .crx, media type application/x-chrome-extension, named
+                               ez-dl-extension-<version>.crx, meant for system-policy
+                               installation — NOT installable by drag and drop; explicit 404
+                               if missing, 503 if signing fails                                [public]
 GET    /extension/version   -> {available, version, filename, size, extension_id, sha256}; 200
                                {"available": false, "version": null, "extension_id": null,
                                "sha256": null, …} if no artifact or signature failure

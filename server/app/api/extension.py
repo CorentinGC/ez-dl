@@ -97,8 +97,17 @@ def _signed_crx(settings: Settings, archive: Path) -> Path:
 
 def _fingerprint(settings: Settings, signed: Path) -> tuple[str, str]:
     """Identifiant Chrome attendu et SHA-256 du `.crx` — les deux repères qui permettent de
-    détecter un artefact substitué en chemin (installation en HTTP clair, tunnel hostile)."""
+    détecter un artefact substitué en chemin (installation en HTTP clair, tunnel hostile).
+
+    L'identifiant ne vaut que pour une installation du paquet SIGNÉ (politique système) : une
+    extension chargée non empaquetée reçoit un identifiant dérivé du chemin du dossier.
+    """
     return crx.signing_identity(settings.data_dir), hashlib.sha256(signed.read_bytes()).hexdigest()
+
+
+def _digest(path: Path) -> str:
+    """SHA-256 d'un artefact publié."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 @router.get("/extension", response_class=HTMLResponse, include_in_schema=False)
@@ -110,13 +119,15 @@ def install_page(settings: Settings = Depends(get_settings)) -> HTMLResponse:
     if archive is None:
         body = _unavailable_body()
     else:
+        body = _install_steps(_artifact_name(version, ".zip"), _digest(archive))
         try:
-            identity, digest = _fingerprint(settings, _signed_crx(settings, archive))
+            identity, _ = _fingerprint(settings, _signed_crx(settings, archive))
         except OSError:
+            # La signature n'est pas nécessaire à la voie principale : la page reste utile,
+            # seul le bloc du paquet signé disparaît.
             logger.warning("Préparation du .crx impossible pour /extension", exc_info=True)
-            body = _unsignable_body()
         else:
-            body = _install_steps(_artifact_name(version, ".crx"), identity, digest)
+            body += _signed_package_note(_artifact_name(version, ".crx"), identity)
 
     template = Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
     return HTMLResponse(
@@ -138,45 +149,55 @@ def _unavailable_body() -> str:
     )
 
 
-def _unsignable_body() -> str:
-    """Corps de la page quand l'extension existe mais que la signature échoue."""
+def _install_steps(zip_name: str, zip_digest: str) -> str:
+    """Corps de la page quand une extension est publiée : bouton, étapes et empreintes.
+
+    Le zip est la voie principale, et non le `.crx` : Chrome refuse tout `.crx` auto-signé
+    déposé sur `chrome://extensions` (`CRX_REQUIRED_PROOF_MISSING`), il exige sur ce chemin
+    une signature du Chrome Web Store. Le paquet signé n'est installable que par politique
+    système, où la vérification se fait sans preuve d'éditeur.
+    """
     return (
-        '<p class="unavailable">Le <code>.crx</code> signé ne peut pas être préparé.</p>'
-        "<p>Le dossier de données du serveur (<code>EZDL_DATA_DIR</code>) n'est pas "
-        "inscriptible : vérifier les droits du volume monté.</p>"
-        '<p class="note">Voie de secours : <a href="/extension/zip">télécharger le zip</a>, '
-        "le décompresser, puis « Charger l'extension non empaquetée ».</p>"
+        f'<a class="download" href="/extension/zip" download>Télécharger '
+        f"{html.escape(zip_name)}</a>"
+        "<ol>"
+        "<li>Décompresser l'archive dans un dossier <strong>qui restera en place</strong> : "
+        "Chrome le relit à chaque démarrage.</li>"
+        "<li>Ouvrir <code>chrome://extensions</code> dans Chrome.</li>"
+        "<li>Activer le <strong>Mode développeur</strong> (interrupteur en haut à droite).</li>"
+        "<li>Cliquer sur <strong>Charger l'extension non empaquetée</strong> et choisir le "
+        "dossier décompressé.</li>"
+        "</ol>"
+        '<p class="note">SHA-256 de l\'archive :<br />'
+        f'<span class="mono">{html.escape(zip_digest)}</span></p>'
+        '<p class="note">Pour mettre à jour plus tard, remplacer le contenu du dossier par '
+        "celui de la nouvelle archive, puis recharger l'extension depuis "
+        "<code>chrome://extensions</code>.</p>"
     )
 
 
-def _install_steps(crx_name: str, identity: str, digest: str) -> str:
-    """Corps de la page quand une extension est publiée : bouton, étapes et empreintes."""
+def _signed_package_note(crx_name: str, identity: str) -> str:
+    """Bloc secondaire décrivant le paquet signé et le seul chemin qui l'accepte."""
     return (
-        f'<a class="download" href="/extension/download" download>Télécharger '
-        f"{html.escape(crx_name)}</a>"
-        "<ol>"
-        "<li>Ouvrir <code>chrome://extensions</code> dans Chrome.</li>"
-        "<li>Activer le <strong>Mode développeur</strong> (interrupteur en haut à droite).</li>"
-        "<li>Glisser le fichier téléchargé sur cette page, puis confirmer l'ajout.</li>"
-        "<li>Vérifier que l'identifiant affiché correspond à celui ci-dessous.</li>"
-        "</ol>"
-        '<p class="note">Identifiant attendu :<br />'
+        "<hr />"
+        '<p class="note"><strong>Paquet signé — installation par politique système.</strong> '
+        f'<a href="/extension/download">{html.escape(crx_name)}</a> est destiné à une '
+        "installation pilotée par politique d'entreprise, seul chemin où Chrome accepte une "
+        "extension signée hors Chrome Web Store. Identifiant du paquet :<br />"
         f'<span class="mono">{html.escape(identity)}</span></p>'
-        '<p class="note">SHA-256 du fichier :<br />'
-        f'<span class="mono">{html.escape(digest)}</span></p>'
-        '<p class="note">Chrome signale les fichiers <code>.crx</code> comme « potentiellement '
-        "dangereux » au téléchargement, parce qu'ils ne viennent pas du Chrome Web Store : "
-        "choisir « Conserver » pour poursuivre.</p>"
-        '<p class="note">Pour mettre à jour plus tard, répéter l\'opération avec le nouveau '
-        "fichier : Chrome remplace la version installée.</p>"
-        '<p class="note">Voie développeur : <a href="/extension/zip">télécharger le zip</a>, '
-        "le décompresser, puis « Charger l'extension non empaquetée ».</p>"
+        '<p class="note">Le <strong>glisser-déposer de ce fichier sur '
+        "<code>chrome://extensions</code> échoue</strong> avec « Package incorrect "
+        "CRX_REQUIRED_PROOF_MISSING » : sur ce chemin Chrome exige une signature du Chrome Web "
+        "Store, qu'aucun serveur auto-hébergé ne peut produire. Utiliser l'archive ci-dessus.</p>"
     )
 
 
 @router.get("/extension/download", include_in_schema=False)
 def download_crx(settings: Settings = Depends(get_settings)) -> FileResponse:
-    """Archive `.crx` signée, installable par glisser-déposer dans `chrome://extensions`."""
+    """Archive `.crx` signée, destinée à l'installation par politique système.
+
+    Elle n'est PAS installable par glisser-déposer : voir `_signed_package_note`.
+    """
     archive = _zip_path(settings)
     if archive is None:
         raise HTTPException(status_code=404, detail=_UNAVAILABLE_DETAIL)

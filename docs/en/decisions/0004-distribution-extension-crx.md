@@ -1,7 +1,22 @@
 # ADR 0004 — Distributing the extension as a `.crx` signed by the server
 
-- **Status**: accepted
+- **Status**: accepted, **amended on 2026-08-22** (see "Amendment" below)
 - **Date**: 2026-08-22
+
+## Amendment — the `.crx` cannot be installed by drag and drop
+
+The original decision rested on a **false** premise: that dropping a self-signed `.crx` onto
+`chrome://extensions`, with developer mode enabled, would install the extension. Chrome refuses
+that gesture with "Package is invalid: CRX_REQUIRED_PROOF_MISSING": on that path `VerifyCrx3`
+requires a publisher proof that only the Chrome Web Store can produce, and developer mode changes
+nothing. Verified in real conditions against the deployed server.
+
+What changes: the **documented path is the zip** (`/extension/zip`) + "Load unpacked". What
+stays: the whole signing chain. The `.crx` produced is valid and is precisely the artifact a
+**system-policy** installation consumes — the only path where Chrome verifies an extension from
+outside the Web Store without a publisher proof. Runtime signing, the persisted key and the
+stable identifier therefore keep their purpose, and `ez-dl-upc` becomes the natural sequel rather
+than a mere convenience.
 
 ## Context
 
@@ -19,12 +34,13 @@ distribute the matching client.
 
 The server **publishes the packaged extension** on four **public** routes (no password):
 
-- `GET /extension` — HTML installation page: extension and server versions, download button, three
-  installation steps, secondary link to the zip.
+- `GET /extension` — HTML installation page: extension and server versions, zip download button,
+  installation steps, the archive's SHA-256, and a secondary block about the signed package.
+- `GET /extension/zip` — the extension zip, artifact of the recommended route ("Load unpacked
+  extension"). Explicit `404` if the image does not contain the artifact.
 - `GET /extension/download` — signed `.crx` archive (`application/x-chrome-extension`, named
-  `ez-dl-extension-<version>.crx`). Explicit `404` if the image does not contain the artifact.
-- `GET /extension/zip` — the raw zip, for the "Load unpacked extension" route (development). `404`
-  under the same conditions.
+  `ez-dl-extension-<version>.crx`), meant for system-policy installation. `404` under the same
+  conditions, `503` if signing fails.
 - `GET /extension/version` — JSON `{available, version, filename, size}`. Returns
   `200 {"available": false, "version": null, ...}` when no artifact is present — **never `404`** on
   this route, which is consumed by the popup to signal that an update is available.
@@ -51,10 +67,10 @@ ADR 0003 mandates Bearer authentication on **all** routes except `GET /api/healt
 
 ## Alternatives considered
 
-- **Distributing the zip alone**: discarded as the primary route — it requires unzipping the archive
-  and **keeping** the extracted folder (Chrome loads an unpacked extension from its source folder;
-  deleting it breaks the extension). The zip is nonetheless still published on `/extension/zip`, as
-  a secondary route for development.
+- **Distributing the zip alone**: discarded as the primary route at decision time — it requires
+  unzipping the archive and **keeping** the extracted folder (Chrome loads an unpacked extension
+  from its source folder; deleting it breaks the extension). *The amendment above reverses that
+  choice: this friction is the price to pay, since the `.crx` cannot be installed manually.*
 - **Chrome Web Store**: discarded — paid developer account, review on every published version, and
   dependency on a third party to distribute the client of a self-hosted server, which contradicts
   the project's logic.
@@ -80,8 +96,11 @@ ADR 0003 mandates Bearer authentication on **all** routes except `GET /api/healt
 - **Published fingerprints for validation.** `GET /extension/version` returns two additional fields:
   `extension_id` (Chrome identifier, 32 characters a-p, derived from the signing key) and `sha256`
   (SHA-256 fingerprint of the served `.crx`). Both are `null` when the `.crx` cannot be prepared
-  (data directory not writable). The `/extension` page displays both values; the user can verify the identifier by
-  opening `chrome://extensions` after installation to detect artifact substitution in transit.
+  (data directory not writable). The `/extension` page itself displays the SHA-256 of the archive
+  actually served and the signed package's identifier — the first to detect artifact substitution in
+  transit, the second because an extension installed through system policy carries that identifier in
+  `chrome://extensions`. (An extension loaded unpacked receives an identifier derived from its folder
+  path, not from the key: the published identifier does not apply to that route.)
 - **Published version validation.** The contents of `extension-version.txt` must be a strictly
   numeric version (`1`, `1.2`, `1.2.3`, or `1.2.3.4`); any other form rejects the file, and the
   server falls back to the generic name `ez-dl-extension.crx` while announcing `version: null`.
@@ -107,8 +126,13 @@ ADR 0003 mandates Bearer authentication on **all** routes except `GET /api/healt
 
 ## Known limitation
 
-Chrome allows **no "one-click" installation** from a web page outside the Chrome Web Store:
-Developer mode remains required, and the user must drag the `.crx` onto `chrome://extensions`.
-Silent installation and update via system policy (`update.xml` + `ExtensionInstallSources` /
-`ExtensionInstallForcelist`) are a possible evolution of this decision (issue `ez-dl-upc`) — **not
-implemented to date**.
+Outside the Chrome Web Store, Chrome allows **no "one-click" installation** from a web page, and
+refuses any signed package that does not come from the Store (`CRX_REQUIRED_PROOF_MISSING`).
+Developer mode and loading unpacked therefore remain mandatory for a manual installation.
+
+Only installation through **system policy** escapes that constraint: a policy-installed extension
+is verified with `VerifierFormat::CRX3`, without a publisher proof, and updates itself from a
+self-hosted `update.xml`. Its cost is real — administrator rights on every machine, and the
+policy must be *mandatory* level (on macOS, a plist in `/Library/Managed Preferences/`, out of
+reach of a user-level `defaults write`). Tracked by issue `ez-dl-upc` — **not implemented to
+date**.

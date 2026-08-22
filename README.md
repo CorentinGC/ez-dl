@@ -132,18 +132,22 @@ The server publishes the packaged extension itself — no clone, no Node.js need
 you install it from.
 
 1. Open `http://<server>:8000/extension` (e.g. `http://nas.local:8000/extension`) and download the
-   `.crx`. That page is public, like the download routes it links to.
-2. Open `chrome://extensions` and enable **Developer mode**.
-3. Drag the downloaded `.crx` onto the page.
+   `.zip`. That page is public, like the download routes it links to.
+2. Unpack it into a folder **that will stay in place** — Chrome reads it again on every start.
+3. Open `chrome://extensions` and enable **Developer mode**.
+4. Click **Load unpacked** and pick the unpacked folder.
 
-Chrome does not allow one-click installs from outside the Chrome Web Store, so Developer mode
-stays required. The page also links the raw `.zip` if you prefer **Load unpacked**.
+Chrome allows no one-click install from outside the Chrome Web Store, and refuses any signed
+package that does not come from the Store — dropping a `.crx` onto `chrome://extensions` fails
+with "Package is invalid: CRX_REQUIRED_PROOF_MISSING", Developer mode or not. The `.crx` served by
+`/extension/download` is meant for a **system-policy** installation, the only path Chrome accepts
+outside the Store.
 
 To publish a new build after changing the extension, bump `version` in `extension/package.json`
-and rerun `docker compose up -d --build` (or `make publish-extension`). The `.crx` is signed at
-runtime with a key stored in `EZDL_DATA_DIR/extension-signing-key.pem` — keep that directory on a
-volume, since Chrome derives the extension ID from it and a lost key means a new ID instead of an
-update.
+and rerun `docker compose up -d --build` (or `make publish-extension`), then replace the unpacked
+folder's contents and reload the extension. The `.crx` is signed at runtime with a key stored in
+`EZDL_DATA_DIR/extension-signing-key.pem` — keep that directory on a volume, since Chrome derives
+the extension ID from it for the policy path and a lost key means a new ID instead of an update.
 
 **Developer alternative** — build it locally and load it unpacked:
 
