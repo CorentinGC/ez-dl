@@ -98,6 +98,17 @@ select {
   letter-spacing: -0.01em;
 }
 
+/* Sélecteur de serveur actif : largeur bornée pour ne pas écraser les onglets. */
+.popup-profile-select {
+  border: 1px solid var(--ez-border);
+  border-radius: var(--ez-radius);
+  background: var(--ez-bg);
+  color: var(--ez-text);
+  font-size: 12px;
+  padding: 4px 6px;
+  max-width: 110px;
+}
+
 .popup-tabs {
   display: flex;
   gap: 4px;

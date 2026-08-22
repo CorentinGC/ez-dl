@@ -8,6 +8,7 @@ import { createApiClient, toApiConfig } from '@/src/lib/api';
 import { EmptyState } from './components/EmptyState';
 import { Header, type PopupView } from './components/Header';
 import { JobsView } from './components/JobsView';
+import { ProfileSelect } from './components/ProfileSelect';
 import { SourcesView } from './components/SourcesView';
 import { useCapabilities } from '@/src/hooks/useCapabilities';
 import { useActiveTab } from './hooks/useActiveTab';
@@ -16,7 +17,7 @@ import { useSettings } from './hooks/useSettings';
 import { useSources } from './hooks/useSources';
 
 export default function App() {
-  const { settings, loading: settingsLoading, configured } = useSettings();
+  const { settings, profiles, activeProfileId, loading: settingsLoading, configured, selectProfile } = useSettings();
   const { tab, loading: tabLoading } = useActiveTab();
   const [view, setView] = useState<PopupView>('sources');
 
@@ -40,6 +41,9 @@ export default function App() {
     return (
       <div className="popup-root popup-root-centered">
         <span className="popup-brand popup-brand-standalone">ez-dl</span>
+        {/* Sélecteur présent ici aussi : basculé sur un profil vide, il reste la seule porte
+            de sortie vers un serveur déjà configuré. */}
+        <ProfileSelect profiles={profiles} activeProfileId={activeProfileId} onSelect={(id) => void selectProfile(id)} />
         <EmptyState variant="not-configured" />
       </div>
     );
@@ -47,7 +51,15 @@ export default function App() {
 
   return (
     <div className="popup-root">
-      <Header activeView={view} onChangeView={setView} sourceCount={sourcesState.sources.length} jobCount={jobs.length} />
+      <Header
+        activeView={view}
+        onChangeView={setView}
+        sourceCount={sourcesState.sources.length}
+        jobCount={jobs.length}
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        onSelectProfile={(id) => void selectProfile(id)}
+      />
       <main className="popup-main">
         {view === 'sources' ? (
           tab && apiClient ? (

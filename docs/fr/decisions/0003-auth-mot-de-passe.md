@@ -76,3 +76,18 @@ le stocker dans la variable d'environnement `EZDL_PASSWORD`, et recréer le cont
 un démarrage silencieux. Tant que `EZDL_PASSWORD` n'est pas défini, le mot de passe reste lisible
 dans `docker logs` (un simple `docker restart` ne le purge pas ; récréer le conteneur en est la
 seule façon).
+
+## Amendement (2026-08-22, issue ez-dl-mdd)
+
+**Profils multi-serveurs côté extension** : l'extension enregistre désormais plusieurs serveurs
+(poste local, NAS, serveur distant), chacun avec sa propre configuration. La conséquence pour cette
+ADR est directe : `chrome.storage.local` contient **N mots de passe en clair** au lieu d'un seul.
+
+L'hypothèse de confiance ne change pas — elle était déjà « quiconque lit le profil Chrome lit le mot
+de passe » — mais elle porte maintenant sur plusieurs serveurs à la fois. Rien n'est chiffré côté
+extension : une clé de chiffrement stockée dans le même `storage.local` que les données qu'elle
+protège n'apporterait qu'une obfuscation, pas une protection.
+
+Garde-fous conservés : le mot de passe n'est affiché que dans le champ dédié de la section Serveur
+(`type="password"`), jamais dans la liste des serveurs enregistrés, jamais dans le sélecteur de la
+popup, jamais loggé.

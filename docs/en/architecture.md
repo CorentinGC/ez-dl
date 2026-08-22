@@ -103,18 +103,51 @@ extension/
 │       ├── App.tsx             # popup root component
 │       ├── main.tsx
 │       └── components/         # video list, quality/folder/preset selector, job tracking (SSE)
-├── entrypoints/options/       # options page (server URL, password, favorite folders…)
+├── entrypoints/options/       # options page (registered servers, favorite folders…)
 ├── src/components/            # shared popup/options components, including the folder browser
 │                              # (navigation, folder creation, remaining disk space)
-├── src/hooks/                 # shared React hooks (folder browser state…)
+├── src/hooks/                 # shared React hooks (server profiles, folder browser state…)
 ├── lib/
 │   ├── api.ts                  # HTTP client (fetch + Bearer), typed against the API contract
 │   ├── folders.ts              # pure navigation logic across the allowed roots
+│   ├── profiles.ts             # server profiles: migration, CRUD, active profile
 │   ├── storage.ts              # chrome.storage.local / chrome.storage.session wrappers
 │   ├── sniffer.ts              # network detection patterns (extensions, content-types)
 │   └── correlation.ts          # DOM picker ↔ network request correlation (learning mode)
 └── tests/                     # Vitest: detection patterns, correlation
 ```
+
+#### Server profiles
+
+Several ez-dl servers can be registered (local machine, NAS, remote server), only one is
+**active** at a time. Everything lives in the single `settings` key of `chrome.storage.local`:
+
+```
+{ version: 2, profiles: [{ id, name, serverUrl, password, favoriteFolders, … }], activeProfileId }
+```
+
+Each profile carries a complete configuration: favorite folders, default preset and cookie
+sending follow the server, since they depend on its roots and its ffmpeg.
+
+The former format — a flat object with no `version`, a single server — is migrated **lazily** on
+the first read, then persisted once and for all. The migration is deterministic (fixed `default`
+identifier, never a random UUID): popup, options page and service worker may migrate at the same
+time, they all write exactly the same object.
+
+The rest of the code only ever sees one server: `getSettings()`/`saveSettings()` are a **flattened
+view** of the active profile, which leaves the API client, the sniffer and the popup views
+unchanged. Two mechanisms complete that contract:
+
+- `watchSettingsRoot()` (on `storage.local.onChanged`) resynchronises a popup and an options page
+  that are open in parallel;
+- the service worker clears its learned-rules cache when `hasActiveServerChanged()` is true — that
+  is, when the **effective** URL or password changes, not on every profile rename or favorite
+  addition.
+
+In the popup, switching happens through a compact selector in the header (hidden while a single
+profile exists); full management — creation by duplication, rename, deletion — lives in the
+options page. That page edits the **selected** profile, which is not necessarily the active one:
+a new server can be configured end to end without the popup switching over to it.
 
 ## API contract
 

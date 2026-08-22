@@ -39,6 +39,10 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
   const sendCookies = settings?.sendCookies ?? false;
 
   useEffect(() => {
+    // Changement de serveur : la liste affichée appartient au serveur précédent, la garder
+    // ferait cohabiter les jobs de deux machines jusqu'au premier rafraîchissement.
+    setJobsById(new Map());
+    setActionError(null);
     if (!settings || !isServerConfigured(settings)) {
       setConnectionMode('idle');
       return;

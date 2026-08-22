@@ -1,32 +1,40 @@
 /**
- * Charge les réglages de l'extension (`storage.local`) au montage de la popup.
+ * Réglages vus par la popup : le profil de serveur actif, la liste des profils disponibles
+ * et la bascule de l'un à l'autre (la gestion complète — création, renommage, suppression —
+ * reste dans la page d'options).
  */
 
-import { useEffect, useState } from 'react';
-import { getSettings, isServerConfigured } from '@/src/lib/storage';
-import type { ExtensionSettings } from '@/src/lib/types';
+import { useCallback } from 'react';
+import { setActiveProfile } from '@/src/lib/profiles';
+import { isServerConfigured } from '@/src/lib/storage';
+import { useSettingsRoot } from '@/src/hooks/useSettingsRoot';
+import type { ServerProfile } from '@/src/lib/types';
 
 export interface UseSettingsResult {
-  settings: ExtensionSettings | null;
+  settings: ServerProfile | null;
+  profiles: ServerProfile[];
+  activeProfileId: string | null;
   loading: boolean;
   configured: boolean;
+  selectProfile: (id: string) => Promise<void>;
 }
 
 export function useSettings(): UseSettingsResult {
-  const [settings, setSettings] = useState<ExtensionSettings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { root, activeProfile, loading, applyRoot } = useSettingsRoot();
 
-  useEffect(() => {
-    let cancelled = false;
-    void getSettings().then((loaded) => {
-      if (cancelled) return;
-      setSettings(loaded);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const selectProfile = useCallback(
+    async (id: string) => {
+      applyRoot(await setActiveProfile(id));
+    },
+    [applyRoot],
+  );
 
-  return { settings, loading, configured: settings ? isServerConfigured(settings) : false };
+  return {
+    settings: activeProfile,
+    profiles: root?.profiles ?? [],
+    activeProfileId: root?.activeProfileId ?? null,
+    loading,
+    configured: activeProfile ? isServerConfigured(activeProfile) : false,
+    selectProfile,
+  };
 }

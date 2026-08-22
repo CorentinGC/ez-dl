@@ -103,18 +103,51 @@ extension/
 │       ├── App.tsx             # composant racine du popup
 │       ├── main.tsx
 │       └── components/         # liste vidéos, sélecteur qualité/dossier/preset, suivi jobs (SSE)
-├── entrypoints/options/       # page d'options (URL serveur, mot de passe, dossiers favoris…)
+├── entrypoints/options/       # page d'options (serveurs enregistrés, dossiers favoris…)
 ├── src/components/            # composants partagés popup/options, dont le navigateur de dossiers
 │                              # (navigation, création de dossier, espace disque restant)
-├── src/hooks/                 # hooks React partagés (état du navigateur de dossiers…)
+├── src/hooks/                 # hooks React partagés (profils de serveur, navigateur de dossiers…)
 ├── lib/
 │   ├── api.ts                  # client HTTP (fetch + Bearer), typé sur le contrat d'API
 │   ├── folders.ts              # logique pure de navigation dans l'arborescence des racines
+│   ├── profiles.ts             # profils de serveur : migration, CRUD, profil actif
 │   ├── storage.ts              # wrappers chrome.storage.local / chrome.storage.session
 │   ├── sniffer.ts              # patterns de détection réseau (extensions, content-types)
 │   └── correlation.ts          # corrélation picker DOM ↔ requêtes réseau (mode apprentissage)
 └── tests/                     # Vitest : patterns de détection, corrélation
 ```
+
+#### Profils de serveur
+
+Plusieurs serveurs ez-dl peuvent être enregistrés (poste local, NAS, serveur distant), un seul
+est **actif** à la fois. Tout tient dans l'unique clé `settings` de `chrome.storage.local` :
+
+```
+{ version: 2, profiles: [{ id, name, serverUrl, password, favoriteFolders, … }], activeProfileId }
+```
+
+Chaque profil porte une configuration complète : les dossiers favoris, le preset par défaut et
+l'envoi de cookies suivent le serveur, puisqu'ils dépendent de ses racines et de son ffmpeg.
+
+L'ancien format — un objet plat sans `version`, un seul serveur — est migré **paresseusement** à
+la première lecture, puis persisté une fois pour toutes. La migration est déterministe
+(identifiant fixe `default`, jamais un UUID aléatoire) : popup, page d'options et service worker
+peuvent migrer en même temps, ils écrivent exactement le même objet.
+
+Le reste du code ne voit qu'un serveur : `getSettings()`/`saveSettings()` sont une **vue aplatie**
+du profil actif, ce qui laisse inchangés le client d'API, le sniffer et les vues de la popup. Deux
+mécanismes complètent ce contrat :
+
+- `watchSettingsRoot()` (sur `storage.local.onChanged`) resynchronise popup et options ouvertes en
+  parallèle ;
+- le service worker vide son cache de règles apprises quand `hasActiveServerChanged()` est vrai —
+  c'est-à-dire quand l'URL ou le mot de passe **effectifs** changent, pas à chaque renommage de
+  profil ou ajout de favori.
+
+Dans la popup, la bascule se fait par un sélecteur compact dans l'en-tête (masqué tant qu'un seul
+profil existe) ; la gestion complète — création par duplication, renommage, suppression — est dans
+la page d'options. Cette page édite le profil **sélectionné**, qui n'est pas forcément l'actif :
+un nouveau serveur se configure de bout en bout sans que la popup bascule dessus.
 
 ## Contrat d'API
 

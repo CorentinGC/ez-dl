@@ -311,3 +311,24 @@ export interface ExtensionSettings {
   /** Envoyer les cookies du site actif au serveur pour les pages authentifiées. */
   sendCookies: boolean;
 }
+
+/**
+ * Un serveur ez-dl enregistré, avec sa configuration complète. `ExtensionSettings` reste la
+ * « vue aplatie » d'un profil : tous les consommateurs (popup, options, background) continuent
+ * de travailler sur ce type, sans savoir combien de profils existent.
+ */
+export interface ServerProfile extends ExtensionSettings {
+  id: string;
+  name: string;
+}
+
+/**
+ * Contenu réel de la clé `settings` de `storage.local` depuis la v2 : plusieurs profils et
+ * celui qui est actif. Le champ `version` sert de discriminant de migration — son absence
+ * identifie l'ancien format plat (v1, un seul serveur).
+ */
+export interface SettingsRoot {
+  version: 2;
+  profiles: ServerProfile[];
+  activeProfileId: string;
+}

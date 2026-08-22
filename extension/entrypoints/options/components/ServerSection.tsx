@@ -4,10 +4,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createApiClient } from '@/src/lib/api';
-import type { ExtensionSettings, HealthResponse } from '@/src/lib/types';
+import type { ExtensionSettings, HealthResponse, ServerProfile } from '@/src/lib/types';
 
 interface ServerSectionProps {
-  settings: ExtensionSettings;
+  profile: ServerProfile;
   onUpdate: (patch: Partial<ExtensionSettings>) => Promise<ExtensionSettings>;
 }
 
@@ -17,15 +17,15 @@ type TestState =
   | { status: 'success'; health: HealthResponse }
   | { status: 'error'; message: string };
 
-export function ServerSection({ settings, onUpdate }: ServerSectionProps) {
-  const [serverUrl, setServerUrl] = useState(settings.serverUrl);
-  const [password, setPassword] = useState(settings.password);
+export function ServerSection({ profile, onUpdate }: ServerSectionProps) {
+  const [serverUrl, setServerUrl] = useState(profile.serverUrl);
+  const [password, setPassword] = useState(profile.password);
   const [testState, setTestState] = useState<TestState>({ status: 'idle' });
 
   useEffect(() => {
-    setServerUrl(settings.serverUrl);
-    setPassword(settings.password);
-  }, [settings.serverUrl, settings.password]);
+    setServerUrl(profile.serverUrl);
+    setPassword(profile.password);
+  }, [profile.serverUrl, profile.password]);
 
   const testConnection = useCallback(async () => {
     setTestState({ status: 'testing' });
@@ -39,8 +39,8 @@ export function ServerSection({ settings, onUpdate }: ServerSectionProps) {
 
   return (
     <section className="options-section">
-      <h2>Serveur</h2>
-      <p className="options-section-description">Adresse et mot de passe de votre serveur ez-dl self-hosted.</p>
+      <h2>Serveur — {profile.name}</h2>
+      <p className="options-section-description">Adresse et mot de passe de ce serveur ez-dl self-hosted.</p>
 
       <div className="field">
         <label className="field-label" htmlFor="server-url">

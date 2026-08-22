@@ -14,6 +14,8 @@ export function useCapabilities(settings: ExtensionSettings | null): { presets: 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Les presets dépendent du ffmpeg du serveur : ceux du serveur précédent n'ont plus cours.
+    setPresets([]);
     if (!settings || !isServerConfigured(settings)) {
       setLoading(false);
       return;

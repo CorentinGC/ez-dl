@@ -1,6 +1,6 @@
 /**
- * Page d'options : configuration du serveur, dossiers favoris, preset par défaut, cookies,
- * et gestion des règles de site apprises.
+ * Page d'options : serveurs enregistrés, puis configuration du serveur sélectionné (adresse,
+ * dossiers favoris, preset par défaut, cookies) et gestion des règles de site apprises.
  */
 
 import { useMemo } from 'react';
@@ -10,17 +10,18 @@ import { isServerConfigured } from '@/src/lib/storage';
 import { CookiesSection } from './components/CookiesSection';
 import { FoldersSection } from './components/FoldersSection';
 import { PresetSection } from './components/PresetSection';
+import { ProfilesSection } from './components/ProfilesSection';
 import { RulesSection } from './components/RulesSection';
 import { ServerSection } from './components/ServerSection';
-import { useSettingsForm } from './hooks/useSettingsForm';
+import { useProfilesForm } from './hooks/useProfilesForm';
 
 export default function App() {
-  const { settings, loading, update } = useSettingsForm();
-  const configured = settings ? isServerConfigured(settings) : false;
-  const { presets, loading: presetsLoading } = useCapabilities(configured ? settings : null);
-  const apiClient = useMemo(() => (settings && configured ? createApiClient(toApiConfig(settings)) : null), [settings, configured]);
+  const { profiles, activeProfileId, selected, loading, select, update, rename, activate, duplicate, remove } = useProfilesForm();
+  const configured = selected ? isServerConfigured(selected) : false;
+  const { presets, loading: presetsLoading } = useCapabilities(configured ? selected : null);
+  const apiClient = useMemo(() => (selected && configured ? createApiClient(toApiConfig(selected)) : null), [selected, configured]);
 
-  if (loading || !settings) {
+  if (loading || !selected) {
     return (
       <main className="options-root">
         <p className="options-hint">Chargement…</p>
@@ -31,11 +32,28 @@ export default function App() {
   return (
     <main className="options-root">
       <h1>Réglages ez-dl</h1>
-      <ServerSection settings={settings} onUpdate={update} />
-      <FoldersSection settings={settings} apiClient={apiClient} onUpdate={update} />
-      <PresetSection settings={settings} presets={presets} presetsLoading={presetsLoading} onUpdate={update} />
-      <CookiesSection settings={settings} onUpdate={update} />
-      <RulesSection apiClient={apiClient} />
+
+      <ProfilesSection
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        selectedId={selected.id}
+        onSelect={select}
+        onRename={(id, name) => void rename(id, name)}
+        onActivate={(id) => void activate(id)}
+        onDuplicate={(id) => void duplicate(id)}
+        onRemove={(id) => void remove(id)}
+      />
+
+      {/* `key` sur le profil sélectionné : changer de serveur remonte toutes les sections, ce qui
+          purge d'un coup leurs états locaux (formulaire, navigation de dossiers, règles chargées)
+          qui appartiennent au serveur précédent. */}
+      <div key={selected.id}>
+        <ServerSection profile={selected} onUpdate={update} />
+        <FoldersSection settings={selected} apiClient={apiClient} onUpdate={update} />
+        <PresetSection settings={selected} presets={presets} presetsLoading={presetsLoading} onUpdate={update} />
+        <CookiesSection settings={selected} onUpdate={update} />
+        <RulesSection apiClient={apiClient} />
+      </div>
     </main>
   );
 }

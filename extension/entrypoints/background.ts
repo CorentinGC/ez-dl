@@ -24,6 +24,7 @@ import type {
   SaveRuleResponse,
   TabStateUpdatedMessage,
 } from '@/src/lib/messaging';
+import { hasActiveServerChanged } from '@/src/lib/profiles';
 import {
   EMPTY_TAB_STATE,
   RULES_CACHE_TTL_MS,
@@ -72,6 +73,14 @@ export default defineBackground(() => {
 
   browser.tabs.onActivated.addListener(({ tabId }) => {
     void getTabState(tabId).then((state) => refreshBadge(tabId, state.candidates.length));
+  });
+
+  // Changement de serveur actif : les règles en cache viennent de l'ancien serveur et seraient
+  // appliquées jusqu'à 5 min de plus. Le test porte sur l'URL/mot de passe effectifs, pour ne pas
+  // vider le cache à chaque renommage de profil ou ajout de favori.
+  browser.storage.local.onChanged.addListener((changes) => {
+    const change = changes.settings;
+    if (change && hasActiveServerChanged(change.oldValue, change.newValue)) void invalidateRulesCache();
   });
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {

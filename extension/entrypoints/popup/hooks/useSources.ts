@@ -35,6 +35,9 @@ export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInf
   const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
+    // Le probe est fait par le serveur : changer de serveur invalide les sources affichées.
+    setSources([]);
+    setPickedElement(null);
     if (!settings || !tab) return;
     let cancelled = false;
     setLoading(true);

@@ -76,3 +76,18 @@ generated password, store it in the `EZDL_PASSWORD` environment variable, and re
 container for a silent startup. As long as `EZDL_PASSWORD` is not set, the password remains
 visible in `docker logs` (a simple `docker restart` does not purge it; recreating the container
 is the only way).
+
+## Amendment (2026-08-22, issue ez-dl-mdd)
+
+**Multi-server profiles in the extension**: the extension now registers several servers (local
+machine, NAS, remote server), each with its own configuration. The direct consequence for this ADR
+is that `chrome.storage.local` holds **N cleartext passwords** instead of one.
+
+The trust assumption does not change — it already was "whoever reads the Chrome profile reads the
+password" — but it now covers several servers at once. Nothing is encrypted extension-side: an
+encryption key stored in the very same `storage.local` as the data it protects would only be
+obfuscation, not protection.
+
+Safeguards kept: the password is only ever shown in the dedicated field of the Server section
+(`type="password"`), never in the list of registered servers, never in the popup selector, never
+logged.

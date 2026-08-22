@@ -13,7 +13,8 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   Smoke test réel validé : health public, 401 sans/avec mauvais mot de passe, 200 avec le bon,
   destination `/etc` refusée en 400, démarrage normal (génération auto du mot de passe si absent).
 - **Extension** : sniffer `background.ts`, popup (sources, qualité, renommage, dossier, preset,
-  jobs en SSE + pause/reprise/retry), options, content script picker. `compile` OK, **120 tests Vitest** verts.
+  jobs en SSE + pause/reprise/retry, sélecteur de serveur), options (profils multi-serveurs),
+  content script picker. `compile` OK, **151 tests Vitest** verts.
   Manifest MV3 : `webRequest, storage, tabs, activeTab, cookies, scripting` + `<all_urls>`.
 - **Infra** : Dockerfile multi-stage non-root, `docker-compose.yml` (+ override GPU), CI GitHub
   Actions, Makefile. `docker compose config` validé.
@@ -71,6 +72,15 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       uniquement) + modale de confirmation dans la popup (« Retirer de la liste » / « Retirer et
       effacer le fichier »). Vérifié sur le conteneur : défaut non destructif, effacement réel,
       409 sur un job en erreur, fichiers voisins intacts. 105 pytest + 129 Vitest. 2026-08-21.
+- [x] `ez-dl-vh2` : déploiement prod sur le serveur perso derrière un tunnel Cloudflare (config
+      réelle hors dépôt, cf. mémoire agent). Rien de commité côté dépôt. 2026-08-22.
+- [x] `ez-dl-mdd` : profils multi-serveurs dans l'extension — `src/lib/profiles.ts` (clé `settings`
+      versionnée v2, migration paresseuse déterministe du format plat, CRUD, vue aplatie
+      `getSettings`/`saveSettings` sur le profil actif, `watchSettingsRoot`), sélecteur dans
+      l'en-tête de la popup, section « Serveurs » dans les options (création par duplication),
+      invalidation du cache de règles du background au changement de serveur effectif.
+      151 tests Vitest, red-green vérifié par mutation. 2026-08-22.
+- [ ] `ez-dl-8hm` : sélecteur de dossier en overlay plein écran + fil d'Ariane (en cours).
 
 ## Décisions récentes (2026-08-21)
 
@@ -205,6 +215,17 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   la ligne de façon optimiste après une annulation la fait réapparaître par SSE, ce qui donnait
   l'impression que « Annuler » ne faisait rien. Le fichier téléchargé n'est **jamais** effacé par
   défaut : il faut `?delete_file=true` (modale de confirmation côté popup, `ez-dl-f4z`).
+- **Réglages de l'extension = un seul objet dans `storage.local`** : la clé `settings` porte
+  désormais `{version: 2, profiles[], activeProfileId}`. La migration depuis l'ancien format plat
+  est **paresseuse** (à la première lecture) et doit rester **déterministe** — identifiant fixe
+  `default`, jamais `crypto.randomUUID()` : popup, options et service worker migrent parfois en
+  même temps, un id aléatoire créerait deux profils divergents selon le dernier écrivain.
+- **Ne pas invalider le cache de règles à chaque écriture de `settings`** : renommer un profil ou
+  ajouter un favori réécrit la clé. Le background compare l'URL + le mot de passe du profil actif
+  (`hasActiveServerChanged`) — sinon le cache TTL 5 min ne sert plus à rien.
+- **Changer de serveur ne remonte pas les composants de la popup** : les hooks gardent leur état
+  local (jobs, presets, sources) alors que leur effet se relance. Chaque effet doit vider son état
+  en tête, sinon les jobs de deux serveurs cohabitent dans la liste (`ez-dl-mdd`).
 - **`delete_file` n'est accepté que sur un job `done`** (409 sinon) : c'est le seul statut où le
   serveur a écrit ce chemin exact. Ailleurs `folder`/`filename` n'est qu'une destination *prévue*,
   et un job échoué porte souvent le nom d'un job voisin abouti — l'effacer détruirait le fichier de
