@@ -80,7 +80,7 @@ server/
 │   │   ├── folders.py        # GET/POST /api/folders (secure navigation + creation)
 │   │   ├── jobs.py           # /api/jobs CRUD, pause/resume, GET /api/jobs/events (SSE)
 │   │   ├── rules.py          # GET/POST/DELETE /api/rules
-│   │   └── extension.py      # public /extension* routes (page, .crx, zip, version)
+│   │   └── extension.py      # public /extension* routes (page, zip, .crx, update.xml, version)
 │   ├── templates/
 │   │   └── extension.html    # install page served by GET /extension
 │   └── core/
@@ -218,7 +218,11 @@ integrity.
 The `.crx` **cannot be installed by drag and drop**: on that path Chrome requires a Chrome Web Store
 publisher proof and rejects the package with `CRX_REQUIRED_PROOF_MISSING`. It stays published
 because it is the artifact of a **system-policy** installation, the only path where Chrome verifies
-an extension from outside the Web Store without that proof. That is also why the stable identifier
+an extension from outside the Web Store without that proof. `GET /extension/update.xml` feeds that
+path: the policy (`ExtensionInstallForcelist`) receives `<identifier>;<manifest url>`, and Chrome
+re-reads the published version there periodically before downloading `codebase`. The absolute URL
+published comes from `EZDL_PUBLIC_URL` when set, from the request otherwise — essential behind a
+reverse proxy, where the host uvicorn sees is not the browser's. That is also why the stable identifier
 derived from the key still matters: it only applies to that path, an extension loaded unpacked
 receiving an identifier derived from its folder path. See
 [ADR 0004](decisions/0004-distribution-extension-crx.md).
@@ -295,6 +299,10 @@ GET    /extension/download  -> signed .crx, media type application/x-chrome-exte
                                ez-dl-extension-<version>.crx, meant for system-policy
                                installation — NOT installable by drag and drop; explicit 404
                                if missing, 503 if signing fails                                [public]
+GET    /extension/update.xml -> Omaha manifest (gupdate 2.0): appid = signed package identifier,
+                               version = published version, codebase = absolute URL of
+                               /extension/download. Target of ExtensionInstallForcelist;
+                               503 when the published version is unknown                       [public]
 GET    /extension/version   -> {available, version, filename, size, extension_id, sha256}; 200
                                {"available": false, "version": null, "extension_id": null,
                                "sha256": null, …} if no artifact or signature failure

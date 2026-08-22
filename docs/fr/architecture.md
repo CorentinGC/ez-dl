@@ -80,7 +80,7 @@ server/
 │   │   ├── folders.py        # GET/POST /api/folders (navigation + création sécurisées)
 │   │   ├── jobs.py           # CRUD /api/jobs, pause/resume, GET /api/jobs/events (SSE)
 │   │   ├── rules.py          # GET/POST/DELETE /api/rules
-│   │   └── extension.py      # routes publiques /extension* (page, .crx, zip, version)
+│   │   └── extension.py      # routes publiques /extension* (page, zip, .crx, update.xml, version)
 │   ├── templates/
 │   │   └── extension.html    # page d'installation servie par GET /extension
 │   └── core/
@@ -220,7 +220,12 @@ l'utilisateur de vérifier l'intégrité du fichier.
 Le `.crx` **n'est pas installable par glisser-déposer** : sur ce chemin Chrome exige une preuve
 d'éditeur du Chrome Web Store et rejette le paquet avec `CRX_REQUIRED_PROOF_MISSING`. Il reste
 publié parce qu'il est l'artefact d'une installation par **politique système**, seul chemin où
-Chrome vérifie une extension hors Web Store sans cette preuve. C'est aussi pourquoi l'identifiant
+Chrome vérifie une extension hors Web Store sans cette preuve. C'est
+`GET /extension/update.xml` qui alimente ce chemin : la politique
+(`ExtensionInstallForcelist`) reçoit `<identifiant>;<url du manifeste>`, et Chrome y relit
+périodiquement la version publiée avant de télécharger `codebase`. L'URL absolue publiée vient
+de `EZDL_PUBLIC_URL` quand elle est définie, de la requête sinon — indispensable derrière un
+reverse proxy, où l'hôte vu par uvicorn n'est pas celui du navigateur. C'est aussi pourquoi l'identifiant
 stable dérivé de la clé garde son sens : il ne vaut que pour ce chemin, une extension chargée non
 empaquetée recevant un identifiant dérivé du chemin de son dossier. Voir
 [ADR 0004](decisions/0004-distribution-extension-crx.md).
@@ -297,6 +302,10 @@ GET    /extension/download  -> .crx signé, media type application/x-chrome-exte
                                nom ez-dl-extension-<version>.crx, destiné à l'installation par
                                politique système — NON installable par glisser-déposer ;
                                404 explicite si absent, 503 si la signature échoue          [public]
+GET    /extension/update.xml -> manifeste Omaha (gupdate 2.0) : appid = identifiant du paquet
+                               signé, version = version publiée, codebase = URL absolue de
+                               /extension/download. Cible d'ExtensionInstallForcelist ;
+                               503 si la version publiée est inconnue                       [public]
 GET    /extension/version   -> {available, version, filename, size, extension_id, sha256} ;
                                200 {"available": false, "version": null, "extension_id": null,
                                "sha256": null, …} si aucun artefact ou échec de signature

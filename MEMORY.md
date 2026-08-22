@@ -121,8 +121,18 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
       (page `/extension`, ADR 0004 amendée, `docs/{fr,en}/setup.md`, `architecture.md`, README×2).
       Le `.crx` reste servi : c'est l'artefact d'une installation par **politique système**, seul
       chemin où Chrome vérifie une extension hors Web Store sans preuve d'éditeur — suite dans
-      `ez-dl-upc` (`/extension/update.xml` + `update_url` + politiques par OS). 153 tests pytest.
+      `ez-dl-upc` (`/extension/update.xml` + politiques par OS). 153 tests pytest.
       2026-08-22.
+- [x] `ez-dl-upc` : installation et mise à jour par **politique système** — route publique
+      `GET /extension/update.xml` (manifeste Omaha `gupdate` 2.0 : `appid` = identifiant du
+      paquet signé, `version` = version publiée, `codebase` = URL absolue du `.crx`),
+      `EZDL_PUBLIC_URL` pour les déploiements derrière reverse proxy, page `/extension` qui
+      affiche la valeur `<identifiant>;<url du manifeste>` prête à coller dans
+      `ExtensionInstallForcelist`. Instructions par OS (registre HKLM, JSON managed Linux,
+      plist MDM macOS) dans `docs/{fr,en}/setup.md`. **Pas de `update_url` dans le manifeste
+      de l'extension** : la politique fournit l'URL, et une URL en dur serait inexploitable
+      (adresse variable, image GHCR unique). 171 tests pytest. 2026-08-22.
+      **Reste à valider en réel : aucun poste n'a encore été enrôlé par politique.**
 - [x] **Lot marque** (`ez-dl-n4d`, `ez-dl-hwn`, `ez-dl-gmz`, `ez-dl-7bq`, `ez-dl-hie`,
       `ez-dl-dwg`) : identité visuelle complète — flèche pleine plongeant dans un bac tracé,
       accent produit `#2563eb` / `#3b82f6`. Sources SVG et pipeline de rendu dans `assets/`

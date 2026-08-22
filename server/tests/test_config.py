@@ -113,3 +113,17 @@ def test_accepts_roots_disjoint_from_the_server_state(tmp_path: Path) -> None:
     )
 
     assert conflicting_roots(settings) == []
+
+
+@pytest.mark.parametrize("raw", ["ez-dl.example.com", "ftp://ez-dl.example.com", "//host"])
+def test_rejects_a_public_url_without_an_http_scheme(raw: str) -> None:
+    """`EZDL_PUBLIC_URL` est recopiée telle quelle dans `update.xml` : une base sans schéma
+    produirait un manifeste que Chrome rejette sans rien expliquer."""
+    with pytest.raises(ValidationError):
+        Settings(password="x", public_url=raw, _env_file=None)
+
+
+def test_strips_the_trailing_slash_of_the_public_url() -> None:
+    settings = Settings(password="x", public_url="https://ez-dl.example.com/", _env_file=None)
+
+    assert settings.public_url == "https://ez-dl.example.com"

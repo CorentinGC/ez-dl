@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # l'image est construite sans le contexte `extension` : la distribution est alors
     # simplement indisponible, le serveur démarre normalement.
     extension_dist_dir: Path = Path("/app/extension-dist")
+    # URL publique du serveur, telle qu'un navigateur la voit. Utile uniquement derrière un
+    # reverse proxy, où l'hôte et le schéma vus par uvicorn ne sont pas ceux du client :
+    # `/extension/update.xml` doit y publier une URL absolue de téléchargement du `.crx`.
+    # Vide = déduite de la requête.
+    public_url: str = ""
     data_dir: Path = Path("/config")
     temp_dir: Path = Path("/tmp/ez-dl")
     max_concurrent_jobs: int = 2
@@ -128,6 +133,23 @@ class Settings(BaseSettings):
             "En Docker, garder les valeurs par défaut : "
             "EZDL_DATA_DIR=/config et EZDL_TEMP_DIR=/tmp/ez-dl."
         )
+
+    @field_validator("public_url")
+    @classmethod
+    def _validate_public_url(cls, value: str) -> str:
+        """Refuse une URL publique qui n'est pas une base `http(s)://hôte` exploitable.
+
+        Cette valeur est recopiée telle quelle dans `update.xml` : une valeur fantaisiste
+        produirait un manifeste que Chrome rejette sans rien expliquer.
+        """
+        value = value.strip().rstrip("/")
+        if not value:
+            return ""
+        if not value.startswith(("http://", "https://")):
+            raise ValueError(
+                f"EZDL_PUBLIC_URL doit commencer par http:// ou https:// (reçu : {value})"
+            )
+        return value
 
     @property
     def roots(self) -> list[DownloadRoot]:

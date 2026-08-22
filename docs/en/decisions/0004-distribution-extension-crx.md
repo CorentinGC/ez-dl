@@ -18,6 +18,14 @@ outside the Web Store without a publisher proof. Runtime signing, the persisted 
 stable identifier therefore keep their purpose, and `ez-dl-upc` becomes the natural sequel rather
 than a mere convenience.
 
+`ez-dl-upc` is **implemented**: `GET /extension/update.xml` publishes the Omaha manifest that
+`ExtensionInstallForcelist` consumes (`<identifier>;<manifest url>`). The absolute `.crx` URL it
+announces comes from `EZDL_PUBLIC_URL` when set, from the request otherwise.
+
+The extension carries **no** `update_url` field in its manifest: the policy supplies the update
+manifest URL itself. A hard-coded URL would be unusable anyway, the server address varying from
+one deployment to the next — and the image published on GHCR is built once for everyone.
+
 ## Context
 
 Until now, installing the ez-dl client on a new machine required redoing the entire development
@@ -134,5 +142,5 @@ Only installation through **system policy** escapes that constraint: a policy-in
 is verified with `VerifierFormat::CRX3`, without a publisher proof, and updates itself from a
 self-hosted `update.xml`. Its cost is real — administrator rights on every machine, and the
 policy must be *mandatory* level (on macOS, a plist in `/Library/Managed Preferences/`, out of
-reach of a user-level `defaults write`). Tracked by issue `ez-dl-upc` — **not implemented to
-date**.
+reach of a user-level `defaults write`). Implemented by issue `ez-dl-upc`: see `docs/en/setup.md`, section "Path without Developer
+mode".

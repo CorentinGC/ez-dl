@@ -58,6 +58,9 @@ services:
       # Artefacts de l'extension déposés par le build — à ne changer que si l'image est
       # construite autrement.
       EZDL_EXTENSION_DIST_DIR: ${EZDL_EXTENSION_DIST_DIR:-/app/extension-dist}
+      # URL publique du serveur — utile seulement derrière un reverse proxy, où
+      # /extension/update.xml doit publier une adresse que le poste client sait joindre.
+      EZDL_PUBLIC_URL: ${EZDL_PUBLIC_URL:-}
       EZDL_TEMP_DIR: ${EZDL_TEMP_DIR:-/tmp/ez-dl}
       EZDL_MAX_CONCURRENT_JOBS: ${EZDL_MAX_CONCURRENT_JOBS:-2}
       EZDL_YTDLP_UPDATE_INTERVAL_HOURS: ${EZDL_YTDLP_UPDATE_INTERVAL_HOURS:-24}

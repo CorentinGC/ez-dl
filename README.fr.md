@@ -154,6 +154,11 @@ paquet signé qui n'en vient pas : déposer un `.crx` sur `chrome://extensions` 
 `/extension/download` est destiné à une installation par **politique système**, seul chemin que
 Chrome accepte hors Web Store.
 
+Pour un parc — ou simplement pour se passer du mode développeur et bénéficier des mises à jour
+automatiques — installer le `.crx` de force par politique système : le serveur publie le manifeste
+de mise à jour correspondant sur `/extension/update.xml`. Instructions par OS dans
+[`docs/fr/setup.md`](docs/fr/setup.md#voie-sans-mode-développeur--installation-par-politique-système).
+
 Pour publier une nouvelle version après avoir modifié l'extension, incrémentez `version` dans
 `extension/package.json`, relancez `docker compose up -d --build` (ou `make publish-extension`),
 puis remplacez le contenu du dossier décompressé et rechargez l'extension. Le `.crx` est signé à

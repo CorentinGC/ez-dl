@@ -19,9 +19,10 @@ import logging
 import re
 from pathlib import Path
 from string import Template
+from xml.sax.saxutils import quoteattr
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from app.config import APP_VERSION, Settings, get_settings
 from app.core import crx
@@ -53,6 +54,24 @@ _UNSIGNABLE_DETAIL = (
     "Impossible de préparer le `.crx` signé : le dossier de données du serveur "
     "(EZDL_DATA_DIR) n'est pas inscriptible. Vérifier les droits du volume monté, puis "
     "réessayer. Le zip reste disponible sur /extension/zip."
+)
+_UNVERSIONED_DETAIL = (
+    "Manifeste de mise à jour indisponible : la version publiée est inconnue ou hors format "
+    "numérique. Chrome compare cette version à celle du `.crx` installé et refuse un "
+    "manifeste sans version exploitable. Reconstruire l'image avec une version valide dans "
+    "`extension/package.json`."
+)
+
+# Manifeste Omaha attendu par Chrome (`gupdate` protocole 2.0). La version annoncée doit être
+# exactement celle du `manifest.json` embarqué dans le `.crx`, sinon Chrome retélécharge en
+# boucle sans jamais considérer la mise à jour appliquée.
+_UPDATE_MANIFEST = (
+    "<?xml version='1.0' encoding='UTF-8'?>\n"
+    "<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>\n"
+    "  <app appid={appid}>\n"
+    "    <updatecheck codebase={codebase} version={version} />\n"
+    "  </app>\n"
+    "</gupdate>\n"
 )
 
 
@@ -110,9 +129,24 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _public_base(settings: Settings, request: Request) -> str:
+    """Base publique du serveur, sans slash final.
+
+    `EZDL_PUBLIC_URL` prime : derrière un reverse proxy, l'hôte et le schéma vus par uvicorn
+    ne sont pas ceux du navigateur, et `update.xml` doit publier une URL absolue que Chrome
+    puisse réellement atteindre.
+
+    À défaut, la base vient de l'en-tête `Host` de la requête, donc du client. Un `Host`
+    falsifié ne fait que renvoyer un manifeste truqué à son propre auteur : la réponse est
+    marquée `no-store` et n'est jamais partagée. Renseigner `EZDL_PUBLIC_URL` reste la parade
+    si un cache s'intercale devant le serveur.
+    """
+    return settings.public_url or str(request.base_url).rstrip("/")
+
+
 @router.get("/extension", response_class=HTMLResponse, include_in_schema=False)
-def install_page(settings: Settings = Depends(get_settings)) -> HTMLResponse:
-    """Page d'installation : téléchargement du `.crx` et marche à suivre dans Chrome."""
+def install_page(request: Request, settings: Settings = Depends(get_settings)) -> HTMLResponse:
+    """Page d'installation : téléchargement du zip et marche à suivre dans Chrome."""
     archive = _zip_path(settings)
     version = _published_version(settings) if archive else None
 
@@ -127,7 +161,8 @@ def install_page(settings: Settings = Depends(get_settings)) -> HTMLResponse:
             # seul le bloc du paquet signé disparaît.
             logger.warning("Préparation du .crx impossible pour /extension", exc_info=True)
         else:
-            body += _signed_package_note(_artifact_name(version, ".crx"), identity)
+            update_url = f"{_public_base(settings, request)}/extension/update.xml"
+            body += _signed_package_note(identity, update_url, version)
 
     template = Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
     return HTMLResponse(
@@ -176,19 +211,39 @@ def _install_steps(zip_name: str, zip_digest: str) -> str:
     )
 
 
-def _signed_package_note(crx_name: str, identity: str) -> str:
-    """Bloc secondaire décrivant le paquet signé et le seul chemin qui l'accepte."""
-    return (
+def _signed_package_note(identity: str, update_url: str, version: str | None) -> str:
+    """Bloc secondaire : installation par politique système, seul chemin sans mode développeur.
+
+    La valeur affichée est exactement celle attendue par `ExtensionInstallForcelist`
+    (`<identifiant>;<url du manifeste>`) : la politique pointe le manifeste de mise à jour,
+    jamais le `.crx` directement.
+    """
+    forcelist = f"{identity};{update_url}" if version else None
+    note = (
         "<hr />"
-        '<p class="note"><strong>Paquet signé — installation par politique système.</strong> '
-        f'<a href="/extension/download">{html.escape(crx_name)}</a> est destiné à une '
-        "installation pilotée par politique d'entreprise, seul chemin où Chrome accepte une "
-        "extension signée hors Chrome Web Store. Identifiant du paquet :<br />"
-        f'<span class="mono">{html.escape(identity)}</span></p>'
-        '<p class="note">Le <strong>glisser-déposer de ce fichier sur '
+        '<p class="note"><strong>Installation par politique système (sans mode '
+        "développeur).</strong> Chrome installe et met à jour tout seul une extension "
+        "déployée par politique d'entreprise : c'est le seul chemin où il accepte un paquet "
+        "signé hors Chrome Web Store. Il demande des droits d'administration sur le poste, et "
+        "une politique de niveau <em>mandatory</em>.</p>"
+    )
+    if forcelist:
+        note += (
+            '<p class="note">Valeur à placer dans <code>ExtensionInstallForcelist</code> :<br />'
+            f'<span class="mono">{html.escape(forcelist)}</span></p>'
+        )
+    else:
+        note += (
+            '<p class="note">Version publiée inconnue : le manifeste de mise à jour '
+            "(<code>/extension/update.xml</code>) reste indisponible tant que "
+            "<code>extension/package.json</code> ne fournit pas une version numérique.</p>"
+        )
+    return note + (
+        '<p class="note">Le <strong>glisser-déposer du <code>.crx</code> sur '
         "<code>chrome://extensions</code> échoue</strong> avec « Package incorrect "
         "CRX_REQUIRED_PROOF_MISSING » : sur ce chemin Chrome exige une signature du Chrome Web "
-        "Store, qu'aucun serveur auto-hébergé ne peut produire. Utiliser l'archive ci-dessus.</p>"
+        "Store, qu'aucun serveur auto-hébergé ne peut produire. Sans politique système, "
+        "utiliser l'archive ci-dessus.</p>"
     )
 
 
@@ -212,6 +267,42 @@ def download_crx(settings: Settings = Depends(get_settings)) -> FileResponse:
         signed,
         media_type=CRX_MEDIA_TYPE,
         filename=_artifact_name(_published_version(settings), ".crx"),
+    )
+
+
+@router.get("/extension/update.xml", include_in_schema=False)
+def update_manifest(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    """Manifeste de mise à jour Omaha, cible de la politique système.
+
+    C'est cette URL — et non celle du `.crx` — que reçoit `ExtensionInstallForcelist` : Chrome
+    la relit périodiquement, compare la version annoncée à celle de l'extension installée, et
+    télécharge `codebase` quand elle a avancé.
+    """
+    archive = _zip_path(settings)
+    if archive is None:
+        raise HTTPException(status_code=404, detail=_UNAVAILABLE_DETAIL)
+
+    version = _published_version(settings)
+    if version is None:
+        raise HTTPException(status_code=503, detail=_UNVERSIONED_DETAIL)
+
+    try:
+        identity, _ = _fingerprint(settings, _signed_crx(settings, archive))
+    except OSError as error:
+        logger.warning("Manifeste de mise à jour impossible à produire", exc_info=True)
+        raise HTTPException(status_code=503, detail=_UNSIGNABLE_DETAIL) from error
+
+    body = _UPDATE_MANIFEST.format(
+        appid=quoteattr(identity),
+        codebase=quoteattr(f"{_public_base(settings, request)}/extension/download"),
+        version=quoteattr(version),
+    )
+    # `no-store` : Chrome doit voir la nouvelle version dès le rebuild, pas au bon vouloir
+    # d'un cache intermédiaire.
+    return Response(
+        body,
+        media_type="text/xml; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
     )
 
 

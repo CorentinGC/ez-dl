@@ -150,6 +150,11 @@ with "Package is invalid: CRX_REQUIRED_PROOF_MISSING", Developer mode or not. Th
 `/extension/download` is meant for a **system-policy** installation, the only path Chrome accepts
 outside the Store.
 
+For a fleet — or just to skip Developer mode and get automatic updates — force-install the `.crx`
+through system policy: the server publishes the matching update manifest on
+`/extension/update.xml`. Per-OS instructions in
+[`docs/en/setup.md`](docs/en/setup.md#path-without-developer-mode--system-policy-installation).
+
 To publish a new build after changing the extension, bump `version` in `extension/package.json`
 and rerun `docker compose up -d --build` (or `make publish-extension`), then replace the unpacked
 folder's contents and reload the extension. The `.crx` is signed at runtime with a key stored in

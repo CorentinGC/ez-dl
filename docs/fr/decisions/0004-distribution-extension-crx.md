@@ -18,6 +18,15 @@ le seul chemin où Chrome vérifie une extension hors Web Store sans preuve d'é
 à l'exécution, la clé persistée et l'identifiant stable gardent donc leur raison d'être, et
 `ez-dl-upc` devient la suite naturelle plutôt qu'un simple confort.
 
+`ez-dl-upc` est **implémentée** : `GET /extension/update.xml` publie le manifeste Omaha que
+`ExtensionInstallForcelist` consomme (`<identifiant>;<url du manifeste>`). L'URL absolue du `.crx`
+qu'il annonce vient de `EZDL_PUBLIC_URL` si elle est définie, de la requête sinon.
+
+L'extension **n'embarque pas** de champ `update_url` dans son manifeste : la politique fournit
+elle-même l'URL du manifeste de mise à jour. Une URL en dur serait de toute façon inutilisable,
+l'adresse du serveur variant d'un déploiement à l'autre — et l'image publiée sur GHCR est
+construite une seule fois pour tous.
+
 ## Contexte
 
 Jusqu'ici, installer le client ez-dl sur une nouvelle machine imposait de refaire toute la chaîne de
@@ -142,4 +151,5 @@ installée par politique est vérifiée en `VerifierFormat::CRX3`, sans preuve d
 à jour toute seule depuis un `update.xml` auto-hébergé. Son coût est réel — droits
 d'administration sur chaque poste, et la politique doit être de niveau *mandatory* (sur macOS,
 un plist dans `/Library/Managed Preferences/`, hors de portée d'un `defaults write` utilisateur).
-Suivi par l'issue `ez-dl-upc` — **non implémentée à ce jour**.
+Mise en œuvre par l'issue `ez-dl-upc` : voir `docs/fr/setup.md`, section « Voie sans Mode
+développeur ».

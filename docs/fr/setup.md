@@ -46,6 +46,7 @@ racine pour le gabarit avec valeurs génériques).
 | `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Racines autorisées, format `Label=/chemin` séparées par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. **Important** : aucune racine ne doit contenir (ou être contenue dans) `EZDL_DATA_DIR` ou `EZDL_EXTENSION_DIST_DIR`. Le serveur refuse de démarrer en cas de violation. |
 | `EZDL_DATA_DIR` | `/config` | SQLite + état persistant (dont la clé de signature du `.crx` — voir [Republier l'extension](#republier-lextension)) |
 | `EZDL_EXTENSION_DIST_DIR` | `/app/extension-dist` | Dossier contenant l'extension empaquetée publiée par le serveur (zip + `extension-version.txt`, dont le contenu doit être une version strictement numérique — `1`, `1.2`, `1.2.3` ou `1.2.3.4` —, toute autre valeur étant ignorée), produit lors du build de l'image Docker. Si le dossier est vide, les routes `/extension/*` restent joignables mais aucun téléchargement n'est disponible. Le dossier appartient à `root` dans l'image : le serveur, non-root, ne fait que le lire. |
+| `EZDL_PUBLIC_URL` | *(vide)* | URL publique du serveur telle qu'un navigateur la voit (`https://ez-dl.example.com`). Nécessaire **uniquement derrière un reverse proxy** : `/extension/update.xml` doit y publier une URL absolue de téléchargement du `.crx`, et l'adresse vue par uvicorn n'est pas celle du client. Vide = déduite de la requête. Doit commencer par `http://` ou `https://`, sinon le serveur refuse de démarrer |
 | `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Fichiers partiels avant déplacement final. Doit **persister** pour que la reprise d'un téléchargement interrompu serve à quelque chose (voir ci-dessous) |
 | `EZDL_MAX_CONCURRENT_JOBS` | `2` | Nombre de workers de la queue |
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS` | `24` | Période de l'auto-update yt-dlp (`0` = désactivé) |
@@ -113,7 +114,8 @@ puis recharger l'extension depuis `chrome://extensions`.
 > CRX_REQUIRED_PROOF_MISSING » — le Mode développeur n'y change rien. Aucun serveur auto-hébergé
 > ne peut produire cette signature. Le `.crx` servi par `/extension/download` reste utile pour
 > une seule chose : l'installation pilotée par **politique système**, seul chemin où Chrome
-> vérifie une extension hors Web Store sans exiger de preuve d'éditeur (issue `ez-dl-upc`).
+> vérifie une extension hors Web Store sans exiger de preuve d'éditeur — voir
+> [Voie sans Mode développeur](#voie-sans-mode-développeur--installation-par-politique-système).
 
 > **Recommandation de sécurité.** Sur un réseau non maîtrisé (Internet, WiFi public), préférer
 > accéder au serveur via **HTTPS** (reverse proxy devant le serveur, tunnel cloudflared, etc.)
@@ -129,19 +131,77 @@ Routes publiques exposées par le serveur :
 | `GET /extension` | Page HTML d'installation (versions, bouton de téléchargement du zip, étapes, empreinte SHA-256, bloc secondaire sur le paquet signé) |
 | `GET /extension/zip` | Zip de l'extension, artefact de la voie recommandée (« Charger l'extension non empaquetée ») |
 | `GET /extension/download` | Archive `.crx` signée (`ez-dl-extension-<version>.crx`, media type `application/x-chrome-extension`), destinée à l'installation par politique système — **non installable par glisser-déposer** |
+| `GET /extension/update.xml` | Manifeste de mise à jour Chrome (protocole Omaha) : identifiant du paquet signé, version publiée, URL absolue du `.crx`. Cible de la politique système. `503` si la version publiée est inconnue |
 | `GET /extension/version` | JSON `{available, version, filename, size, extension_id, sha256}`, consommé par l'extension pour signaler qu'une nouvelle version est disponible. `extension_id` et `sha256` valent `null` si la signature a échoué |
 
 > **Limite connue.** Hors Chrome Web Store, Chrome n'offre aucune installation « en un clic »
-> depuis une page web, et refuse tout paquet signé qui ne vient pas du Store : le Mode
-> développeur et le chargement non empaqueté restent obligatoires. La seule alternative est
-> l'installation par **politique système** (`update.xml` + `ExtensionInstallForcelist`), qui
-> apporte aussi la mise à jour automatique mais exige des droits d'administration sur chaque
-> poste — issue `ez-dl-upc`, pas encore disponible.
+> depuis une page web. La voie ci-dessus impose donc le Mode développeur et le chargement non
+> empaqueté ; la seule autre option est la politique système, décrite juste en dessous.
 
 Si l'image serveur a été construite **sans** le contexte `extension` (par exemple un `docker build`
 lancé à la main dans `server/`), le build réussit quand même mais la distribution est indisponible :
 la page l'explique, les deux routes de téléchargement renvoient `404`, et `GET /extension/version`
 renvoie `200` avec `{"available": false, "version": null, ...}` (jamais `404`).
+
+### Voie sans Mode développeur — installation par politique système
+
+C'est le **seul** moyen d'installer l'extension sans Mode développeur, et le seul qui apporte la
+mise à jour automatique. Une extension déployée par politique est vérifiée par Chrome en
+`VerifierFormat::CRX3`, sans preuve d'éditeur : le `.crx` signé par le serveur est accepté. En
+contrepartie, il faut des droits d'administration sur chaque poste, et la politique doit être de
+niveau **mandatory** — une politique « recommandée » ou posée dans le domaine utilisateur ramène
+l'erreur `CRX_REQUIRED_PROOF_MISSING`.
+
+Deux valeurs à récupérer d'abord, sur `http://<serveur>:8000/extension` ou via
+`GET /extension/version` :
+
+- l'**identifiant** du paquet signé (32 caractères `a`-`p`, dérivé de la clé du serveur) ;
+- l'URL du **manifeste de mise à jour** : `https://<serveur>/extension/update.xml`.
+
+La page d'installation affiche directement la valeur concaténée à coller dans la politique, sous
+la forme `<identifiant>;<url du manifeste>`. La politique pointe le **manifeste**, jamais le `.crx`.
+
+> **HTTPS obligatoire.** Chrome exige une URL `https` pour le téléchargement du `.crx` sur ce
+> chemin. Derrière un reverse proxy, renseigner `EZDL_PUBLIC_URL` (voir le tableau des variables) :
+> sans elle, le serveur déduit l'URL de la requête et publie l'adresse interne, que le poste
+> client ne sait pas joindre.
+
+**Windows** — registre, ruche `HKEY_LOCAL_MACHINE` (une GPO produit la même chose) :
+
+```
+HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist
+  "1" = "<identifiant>;https://ez-dl.example.com/extension/update.xml"
+```
+
+**Linux** — fichier JSON dans `/etc/opt/chrome/policies/managed/` (`/etc/chromium/policies/managed/`
+pour Chromium), appartenant à `root` et non inscriptible par les autres :
+
+```json
+{
+  "ExtensionInstallForcelist": [
+    "<identifiant>;https://ez-dl.example.com/extension/update.xml"
+  ]
+}
+```
+
+**macOS** — profil de configuration déployé par MDM, écrivant dans
+`/Library/Managed Preferences/com.google.Chrome.plist` :
+
+```xml
+<key>ExtensionInstallForcelist</key>
+<array>
+  <string>&lt;identifiant&gt;;https://ez-dl.example.com/extension/update.xml</string>
+</array>
+```
+
+> Un `defaults write com.google.Chrome …` lancé depuis le compte utilisateur **ne suffit pas** :
+> il écrit une préférence de domaine utilisateur, que Chrome traite comme « recommandée ». Seul
+> un profil managé (MDM) produit une politique *mandatory*.
+
+Vérifier ensuite dans `chrome://policy` que la politique est chargée et à l'état **OK**, puis
+forcer un contrôle depuis `chrome://extensions`. Chrome relit le manifeste périodiquement (quelques
+heures) : après un `docker compose up -d --build` avec une version bumpée, la mise à jour arrive
+seule.
 
 ### Voie développeur — extension non empaquetée
 

@@ -4,6 +4,7 @@ publiée, avec et sans artefact embarqué dans l'image."""
 from __future__ import annotations
 
 import hashlib
+from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
@@ -61,7 +62,7 @@ def test_install_page_is_public_and_shows_the_published_version(app_client, publ
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert VERSION in response.text
-    assert "/extension/download" in response.text
+    assert "/extension/zip" in response.text
 
 
 def test_install_page_explains_when_no_extension_is_published(app_client, dist_dir):
@@ -201,7 +202,64 @@ def test_install_page_ignores_a_version_outside_the_numeric_format(app_client, p
     assert page.status_code == 200
     assert "<script>" not in page.text
     assert "etc/passwd" not in page.text
-    assert "ez-dl-extension.crx" in page.text, "repli sur le nom générique"
+    assert "ez-dl-extension.zip" in page.text, "repli sur le nom générique"
+
+
+def test_update_manifest_matches_the_published_identity_and_version(app_client, published):
+    """Chrome compare la version annoncée à celle du `.crx` installé, et n'installe que si
+    `appid` correspond à la clé qui a signé le paquet."""
+    response = app_client.get("/extension/update.xml")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/xml")
+    assert response.headers["cache-control"] == "no-store"
+
+    root = ElementTree.fromstring(response.text)
+    assert root.tag == "{http://www.google.com/update2/response}gupdate"
+    assert root.get("protocol") == "2.0"
+    app = root[0]
+    assert app.get("appid") == app_client.get("/extension/version").json()["extension_id"]
+    check = app[0]
+    assert check.get("version") == VERSION
+    assert check.get("codebase", "").endswith("/extension/download")
+
+
+def test_update_manifest_uses_the_configured_public_url(app_client, published, monkeypatch):
+    """Derrière un reverse proxy, l'hôte vu par uvicorn n'est pas celui du navigateur : une
+    `codebase` déduite de la requête pointerait une adresse inatteignable."""
+    monkeypatch.setenv("EZDL_PUBLIC_URL", "https://ez-dl.example.com/")
+    get_settings.cache_clear()
+
+    codebase = ElementTree.fromstring(app_client.get("/extension/update.xml").text)[0][0].get(
+        "codebase"
+    )
+
+    assert codebase == "https://ez-dl.example.com/extension/download"
+
+
+def test_update_manifest_refuses_to_announce_an_unknown_version(app_client, dist_dir):
+    """Un manifeste sans version exploitable ferait boucler Chrome sur le téléchargement."""
+    (dist_dir / ZIP_FILENAME).write_bytes(ARCHIVE)
+
+    response = app_client.get("/extension/update.xml")
+
+    assert response.status_code == 503
+    assert "version" in response.json()["detail"]
+
+
+def test_update_manifest_returns_404_without_artifact(app_client, dist_dir):
+    assert app_client.get("/extension/update.xml").status_code == 404
+
+
+def test_install_page_shows_the_forcelist_value(app_client, published):
+    """La politique système prend `<identifiant>;<url du manifeste>` — jamais l'URL du
+    `.crx` — et c'est cette valeur exacte que la page doit donner à copier."""
+    identity = app_client.get("/extension/version").json()["extension_id"]
+
+    page = app_client.get("/extension").text
+
+    assert f"{identity};http://testserver/extension/update.xml" in page
+    assert "ExtensionInstallForcelist" in page
 
 
 def test_zip_route_refuses_a_symlinked_artifact(app_client, dist_dir, tmp_path):
