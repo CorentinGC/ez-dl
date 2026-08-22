@@ -149,3 +149,37 @@ def test_create_folder_requires_auth(client_no_worker, download_root) -> None:
 
     assert response.status_code == 401
     assert not (download_root / "movies").exists()
+
+
+def test_browse_folder_hides_system_and_hidden_entries(client_no_worker, download_root) -> None:
+    """`@eaDir` & co ne sont jamais proposés : les lister envoie l'utilisateur télécharger
+    dans un dossier invisible (cas vécu : racine Synology dont c'est le seul sous-dossier)."""
+    (download_root / "@eaDir").mkdir()
+    (download_root / "#recycle").mkdir()
+    (download_root / ".DS_Store").write_text("x")
+    (download_root / "Films").mkdir()
+
+    body = client_no_worker.get(
+        "/api/folders", params={"path": str(download_root)}, headers=AUTH
+    ).json()
+
+    assert {e["name"] for e in body["entries"]} == {"Films"}
+
+
+def test_browse_system_folder_returns_400(client_no_worker, download_root) -> None:
+    (download_root / "@eaDir").mkdir()
+
+    response = client_no_worker.get(
+        "/api/folders", params={"path": str(download_root / "@eaDir")}, headers=AUTH
+    )
+
+    assert response.status_code == 400
+
+
+def test_create_folder_rejects_system_name(client_no_worker, download_root) -> None:
+    response = client_no_worker.post(
+        "/api/folders", json={"parent": str(download_root), "name": "@eaDir"}, headers=AUTH
+    )
+
+    assert response.status_code == 400
+    assert not (download_root / "@eaDir").exists()

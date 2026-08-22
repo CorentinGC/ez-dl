@@ -10,7 +10,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.config import DownloadRoot
-from app.core.paths import resolve_destination, resolve_folder, root_issue, sanitize_filename
+from app.core.paths import (
+    is_system_entry,
+    resolve_destination,
+    resolve_folder,
+    root_issue,
+    sanitize_filename,
+)
 from app.schemas import (
     CurrentFolderOut,
     FolderCreate,
@@ -80,6 +86,11 @@ def list_folders(request: Request, path: str | None = Query(default=None)) -> Fo
     if resolved.is_dir():
         with os.scandir(resolved) as scan:
             for entry in sorted(scan, key=lambda e: (not e.is_dir(), e.name.lower())):
+                # Entrées cachées et métadonnées NAS/OS (@eaDir, #recycle, .DS_Store…) :
+                # les proposer comme destination envoie les téléchargements dans un dossier
+                # invisible pour l'utilisateur (vécu sur une racine Synology).
+                if is_system_entry(entry.name):
+                    continue
                 entries.append(
                     FolderEntryOut(
                         name=entry.name, path=str(resolved / entry.name), is_dir=entry.is_dir()

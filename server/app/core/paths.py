@@ -11,6 +11,29 @@ from app.config import DownloadRoot
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MAX_FILENAME_LENGTH = 180
 
+# Entrées de métadonnées créées par les NAS/OS sur les volumes partagés (comparaison en
+# minuscules) : jamais des destinations légitimes, et du bruit dans le navigateur de dossiers.
+# Cas vécu : une racine Synology dont le seul sous-dossier est `@eaDir` — l'utilisateur n'a
+# que lui à choisir, et le téléchargement part dans un dossier masqué par DSM/SMB.
+_SYSTEM_ENTRY_NAMES = frozenset(
+    {
+        "@eadir",  # Synology DSM — vignettes et index
+        "#recycle",  # Synology — corbeille
+        "#snapshot",  # Synology — snapshots
+        "@recycle",  # QNAP — corbeille
+        "$recycle.bin",  # Windows — corbeille
+        "system volume information",  # Windows
+        "lost+found",  # ext4
+        "thumbs.db",  # Windows — cache de vignettes
+    }
+)
+
+
+def is_system_entry(name: str) -> bool:
+    """Vrai pour une entrée cachée (préfixe `.`) ou système (métadonnées NAS/OS) :
+    à masquer du navigateur de dossiers."""
+    return name.startswith(".") or name.lower() in _SYSTEM_ENTRY_NAMES
+
 
 class PathSecurityError(ValueError):
     """Levée quand un chemin résolu sort des racines de téléchargement autorisées."""
@@ -101,6 +124,20 @@ def _available_root(resolved: Path, roots: list[DownloadRoot]) -> DownloadRoot:
     return root
 
 
+def _reject_system_components(resolved: Path, root: DownloadRoot) -> None:
+    """Refuse un chemin dont un composant **sous la racine** est un dossier système.
+
+    Seuls les noms système exacts sont refusés, pas les dot-dossiers : ceux-ci sont masqués
+    du navigateur mais restent utilisables comme destination explicite (ex. `.incoming`).
+    """
+    relative = resolved.relative_to(root.path.resolve())
+    for part in relative.parts:
+        if part.lower() in _SYSTEM_ENTRY_NAMES:
+            raise PathSecurityError(
+                f"Destination refusée : « {part} » est un dossier système (métadonnées NAS/OS)."
+            )
+
+
 def resolve_folder(folder: str, roots: list[DownloadRoot]) -> Path:
     """Résout un chemin de dossier et vérifie qu'il est sous une racine autorisée ET utilisable."""
     # Pas de `expanduser()` : le contrat exige un chemin absolu, `~` ne peut désigner qu'un
@@ -110,7 +147,8 @@ def resolve_folder(folder: str, roots: list[DownloadRoot]) -> Path:
     if not candidate.is_absolute():
         raise PathSecurityError(f"Chemin de dossier invalide (doit être absolu) : {folder!r}")
     resolved = candidate.resolve()
-    _available_root(resolved, roots)
+    root = _available_root(resolved, roots)
+    _reject_system_components(resolved, root)
     return resolved
 
 
@@ -122,7 +160,8 @@ def resolve_destination(folder: str, filename: str, roots: list[DownloadRoot]) -
     destination = (folder_path / safe_name).resolve()
     # Même contrôle que sur le dossier : un lien symbolique pourrait faire sortir la
     # destination de la racine validée, ou la faire retomber sur une racine indisponible.
-    _available_root(destination, roots)
+    root = _available_root(destination, roots)
+    _reject_system_components(destination, root)
     return destination
 
 

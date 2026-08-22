@@ -11,7 +11,9 @@ from app.config import DownloadRoot
 from app.core.paths import (
     PathSecurityError,
     RootUnavailableError,
+    is_system_entry,
     resolve_destination,
+    resolve_folder,
     root_issue,
     sanitize_filename,
     unavailable_roots,
@@ -171,3 +173,48 @@ def test_unavailable_roots_lists_only_broken_roots(tmp_path) -> None:
     assert [root.label for root, _ in reported] == ["Missing", "File"]
     assert "n'existe pas" in reported[0][1]
     assert "n'est pas un dossier" in reported[1][1]
+
+
+def test_is_system_entry_flags_nas_metadata_and_hidden_names() -> None:
+    """Dossiers de métadonnées NAS/OS (insensible à la casse) et entrées cachées."""
+    assert is_system_entry("@eaDir")
+    assert is_system_entry("@EADIR")
+    assert is_system_entry("#recycle")
+    assert is_system_entry("$RECYCLE.BIN")
+    assert is_system_entry("lost+found")
+    assert is_system_entry(".DS_Store")
+    assert not is_system_entry("Films")
+    assert not is_system_entry("recycle")
+
+
+def test_resolve_folder_rejects_system_component(tmp_path) -> None:
+    """Un chemin traversant `@eaDir` est refusé comme destination : le téléchargement
+    partirait dans un dossier masqué par le NAS (vécu sur une racine Synology)."""
+    root = tmp_path / "downloads"
+    (root / "@eaDir").mkdir(parents=True)
+    roots = [DownloadRoot(label="Downloads", path=root)]
+
+    with pytest.raises(PathSecurityError):
+        resolve_folder(str(root / "@eaDir"), roots)
+    with pytest.raises(PathSecurityError):
+        resolve_folder(str(root / "@eaDir" / "sub"), roots)
+
+
+def test_resolve_destination_rejects_system_name_as_final_component(tmp_path) -> None:
+    """`resolve_destination` refuse aussi un nom système en dernier composant (route de
+    création de dossier)."""
+    root = tmp_path / "downloads"
+    root.mkdir()
+    roots = [DownloadRoot(label="Downloads", path=root)]
+
+    with pytest.raises(PathSecurityError):
+        resolve_destination(str(root), "@eaDir", roots)
+
+
+def test_resolve_folder_allows_dot_folder_as_explicit_destination(tmp_path) -> None:
+    """Les dot-dossiers sont masqués du navigateur mais restent des destinations valides."""
+    root = tmp_path / "downloads"
+    (root / ".incoming").mkdir(parents=True)
+    roots = [DownloadRoot(label="Downloads", path=root)]
+
+    assert resolve_folder(str(root / ".incoming"), roots) == root / ".incoming"

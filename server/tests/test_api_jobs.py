@@ -245,6 +245,8 @@ def test_create_job_persists_the_requested_format_id(client_no_worker, download_
     assert response.status_code == 201
     detail = client_no_worker.get(f"/api/jobs/{response.json()['job_id']}", headers=AUTH)
     assert detail.json()["format_id"] == "137"
+
+
 def _create_done_job(client, download_root, filename: str = "video.mp4") -> str:
     """Crée un job puis le force en `done`, comme après un déplacement réussi.
 
@@ -326,3 +328,21 @@ def test_delete_file_toward_an_unmounted_root_returns_400_and_keeps_the_job(
 
     assert response.status_code == 400
     assert client_no_worker.get(f"/api/jobs/{job_id}", headers=AUTH).status_code == 200
+
+
+def test_create_job_targeting_system_folder_returns_400(client_no_worker, download_root) -> None:
+    """Un favori/défaut client resté sur `@eaDir` doit produire une erreur claire à la
+    création du job, pas un téléchargement dans un dossier invisible."""
+    (download_root / "@eaDir").mkdir()
+
+    response = client_no_worker.post(
+        "/api/jobs",
+        json={
+            "url": "https://example.com/video",
+            "folder": str(download_root / "@eaDir"),
+            "filename": "video.mp4",
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
