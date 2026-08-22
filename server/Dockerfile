@@ -71,7 +71,11 @@ FROM scratch AS extension
 # La version est lue depuis extension/package.json, seule source de vérité (WXT l'injecte
 # aussi dans le manifest) ; le serveur la republie sur /extension/version.
 # =============================================================================
-FROM node:22-slim AS extension-zip
+# --platform=$BUILDPLATFORM : ce stage ne produit qu'un zip et un fichier texte, rien de
+# natif. Sans ce flag, un build multi-arch relance `npm ci && npm run zip` une fois par
+# plateforme cible — sous émulation pour les autres arch, soit plusieurs minutes pour un
+# résultat identique au bit près.
+FROM --platform=$BUILDPLATFORM node:22-slim AS extension-zip
 
 WORKDIR /ext
 
