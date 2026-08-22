@@ -20,6 +20,10 @@ tag créé avec le `GITHUB_TOKEN` ne déclenche aucun workflow. Conséquence : u
 `main` publie une version. **Un déploiement sur `latest` se fige
 tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des réglages d'exécution
 (entrypoint root → chown → `gosu`), plus des ARG de build.
+**Première version publiée : `v0.1.1` (2026-08-22)** — index multi-arch vérifié
+(`linux/amd64` + `linux/arm64`) sur `latest`/`0.1.1`/`0.1`, GitHub Release avec `install.sh`,
+`docker-compose.yml` et leurs `.sha256`. `v0.1.0` est un tag orphelin : sa publication a échoué
+sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui correspond.
 
 - **Serveur** : routes `/api/{health,capabilities,probe,folders,jobs,jobs/events,rules}`, wrappers
   yt-dlp/ffmpeg, queue asyncio + SQLite, auth Bearer. `ruff` clean, **26 tests pytest** verts.
@@ -236,6 +240,15 @@ tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des rég
   glob ne matche rien (« no matches found ») — piège vu en test ; préférer `rm -rf dossier` + `mkdir`.
 - **`/api/capabilities` doit rester filtré** : `ffmpeg -encoders` en retourne ~192 (images,
   sous-titres, PCM). `relevant_encoders()` réduit à ceux exploitables — ne pas exposer la liste brute.
+- **stdout appartient à la commande, pas à l'entrypoint (ez-dl-y1y)** : `docker-entrypoint.sh`
+  journalisait sur stdout, donc `docker run <img> id -u` renvoyait les lignes `[ez-dl] …` en plus
+  du résultat — l'assertion de drop de privilèges en CI échouait sans laisser la moindre trace
+  dans le log (les lignes partaient dans la substitution). `log()` et `warn()` écrivent sur stderr.
+- **`type=semver` de metadata-action lit `github.ref` (ez-dl-xkl)** : sur un appel
+  `workflow_call`, `github.ref` vaut `refs/heads/main` et non le tag — aucun tag d'image calculé,
+  `imagetools create` en échec, `latest` jamais posé. Passer `value=${{ inputs.ref ||
+  github.ref_name }}`. Même piège que le `tag_name` explicite d'`action-gh-release`.
+
 - **`EventSource` ne peut pas porter d'en-tête `Authorization`** : le suivi des jobs en SSE est donc
   fait à la main via `fetch` + `ReadableStream`, avec repli sur du polling.
 - **`--` obligatoire avant l'URL passée à yt-dlp** : sans lui, une URL en `-...` est parsée
