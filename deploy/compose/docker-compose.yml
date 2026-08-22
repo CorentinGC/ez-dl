@@ -1,0 +1,108 @@
+# ez-dl — stack Docker autonome, sans clone du dépôt.
+#
+# Ce fichier est un ASSET DE RELEASE : il ne contient pas de section `build:`, puisqu'une
+# machine qui ne clone rien n'a ni ./server ni ./extension. Il tire l'image publiée.
+#
+# Installation en une commande (télécharge ce fichier, génère un mot de passe, démarre) :
+#   curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh | sh
+#
+# Ou à la main :
+#   1. déposer ce fichier dans un dossier vide
+#   2. créer un `.env` à côté avec EZDL_PASSWORD=<mot de passe fort> et PUID/PGID
+#   3. `docker compose up -d`
+#
+# Le dépôt complet (build local, variante GPU) : voir docker-compose.yml à la racine.
+
+services:
+  server:
+    # `latest` suit les versions taguées, pas la branche main. Épingler une version
+    # (`:0.1.0`) ou suivre main (`:edge`) via EZDL_IMAGE dans le .env.
+    image: ${EZDL_IMAGE:-ghcr.io/corentingc/ez-dl:latest}
+    # Sans ça, `docker compose up -d` réutilise indéfiniment l'image déjà tirée.
+    # `EZDL_PULL_POLICY=never` pour tourner sur une image locale (build maison, hôte
+    # hors ligne, image chargée par `docker load`).
+    pull_policy: ${EZDL_PULL_POLICY:-always}
+    container_name: ez-dl
+    restart: unless-stopped
+
+    # Opt-in du service `watchtower` ci-dessous : seuls les conteneurs portant ces labels
+    # (et ce scope) sont mis à jour — les autres stacks de l'hôte ne sont jamais touchées.
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.scope=ez-dl
+
+    env_file:
+      - path: .env
+        required: false
+
+    environment:
+      # uid/gid d'exécution — à aligner sur le propriétaire du dossier de téléchargements.
+      # Appliqués au démarrage du conteneur : aucune reconstruction d'image nécessaire.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+
+      # Obligatoire : sans mot de passe défini, le serveur en génère un nouveau à CHAQUE
+      # démarrage et l'affiche dans les logs. install.sh en écrit un dans le .env.
+      EZDL_PASSWORD: "${EZDL_PASSWORD:-}"
+      EZDL_PORT: 8000
+      EZDL_DOWNLOAD_ROOTS: ${EZDL_DOWNLOAD_ROOTS:-Downloads=/data/downloads}
+      EZDL_DATA_DIR: /config
+      # URL publique du serveur — à renseigner derrière un reverse proxy uniquement.
+      EZDL_PUBLIC_URL: ${EZDL_PUBLIC_URL:-}
+      EZDL_TEMP_DIR: /tmp/ez-dl
+      EZDL_MAX_CONCURRENT_JOBS: ${EZDL_MAX_CONCURRENT_JOBS:-2}
+      EZDL_LOG_LEVEL: ${EZDL_LOG_LEVEL:-info}
+
+    ports:
+      - "${EZDL_PORT:-8000}:8000"
+
+    volumes:
+      # Base SQLite, état applicatif et clé de signature de l'extension. Volume NOMMÉ :
+      # son contenu appartient dès la création à l'utilisateur de l'image, alors qu'un
+      # bind mount hériterait des droits du dossier hôte.
+      - ezdl-config:/config
+
+      # Fichiers partiels avant déplacement final. Volume nommé donc persistant : c'est
+      # ce qui permet de reprendre un téléchargement interrompu par un redémarrage.
+      - ezdl-temp:/tmp/ez-dl
+
+      # Dossier de destination des téléchargements, côté hôte. `EZDL_DOWNLOADS_DIR` est
+      # écrit par install.sh ; le dossier doit exister AVANT le premier `up` (sinon Docker
+      # le crée en root) et appartenir à PUID:PGID.
+      - ${EZDL_DOWNLOADS_DIR:-./downloads}:/data/downloads:rw
+
+    # Cookie-jars yt-dlp, montés PAR-DESSUS le volume temporaire : les cookies transmis
+    # par l'extension ne doivent jamais toucher le disque.
+    tmpfs:
+      - /tmp/ez-dl/cookies:mode=1777,size=16m
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  # Mise à jour automatique : tire la nouvelle image dès qu'une version est publiée, puis
+  # recrée le conteneur `server` à l'identique. Opt-in par `COMPOSE_PROFILES=autoupdate`
+  # dans le .env (install.sh l'active par défaut).
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: ez-dl-watchtower
+    profiles: ["autoupdate"]
+    restart: unless-stopped
+    volumes:
+      # Nécessaire pour recréer le conteneur — c'est un accès root à Docker : le service
+      # n'expose aucun port et ne surveille que les conteneurs du scope `ez-dl`.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_SCOPE: ez-dl
+      WATCHTOWER_POLL_INTERVAL: ${EZDL_AUTO_UPDATE_INTERVAL_SECONDS:-300}
+      WATCHTOWER_CLEANUP: "true"
+    labels:
+      - com.centurylinklabs.watchtower.scope=ez-dl
+
+volumes:
+  ezdl-config:
+  ezdl-temp:

@@ -86,6 +86,60 @@ réécrite. Pour un conteneur non-root de bout en bout, fixez `user:` dans le co
 détecte alors qu'il n'est pas `root`, ne tente aucun changement de propriétaire et exécute
 directement la commande ; c'est à vous de fournir des volumes déjà inscriptibles.
 
+## Installation en une commande (voie facile)
+
+Pour un serveur qui ne sert qu'à faire tourner ez-dl, sans cloner le dépôt :
+
+```bash
+curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh | sh
+```
+
+Le script télécharge le compose autonome de la dernière release, **vérifie sa somme SHA-256**,
+génère un mot de passe fort dans un `.env` en `0600`, crée le dossier de téléchargements, démarre
+le stack et attend que `/api/health` réponde. Il ne pose aucune question et n'utilise jamais
+`sudo` ; tout se règle par variables d'environnement :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `EZDL_DIR` | `~/ez-dl` | Dossier d'installation |
+| `EZDL_PORT` | `8000` | Port publié sur l'hôte |
+| `EZDL_DOWNLOADS_DIR` | `$EZDL_DIR/downloads` | Destination des téléchargements |
+| `EZDL_PASSWORD` | généré | Mot de passe imposé plutôt que généré |
+| `EZDL_TAG` | `latest` | Tag d'image (`0.1.0`, `edge`…) |
+| `EZDL_AUTOUPDATE` | `true` | Service watchtower de mise à jour automatique |
+
+`sh install.sh --dry-run` montre ce qui serait fait sans rien écrire. Relancé sur une
+installation existante, le script passe en **mode mise à jour** : il ne touche pas au `.env`,
+donc pas au mot de passe.
+
+Un script tiré du réseau et exécuté mérite d'être lu avant : `curl -fsSL <url> | less`. C'est un
+asset de release figé, pas un fichier de la branche `main`.
+
+### Équivalent manuel
+
+```bash
+mkdir -p ~/ez-dl && cd ~/ez-dl
+curl -fsSLO https://github.com/CorentinGC/ez-dl/releases/latest/download/docker-compose.yml
+curl -fsSLO https://github.com/CorentinGC/ez-dl/releases/latest/download/docker-compose.yml.sha256
+sha256sum -c docker-compose.yml.sha256      # macOS : shasum -a 256 -c
+
+mkdir -p downloads
+umask 077 && cat > .env <<EOF
+EZDL_PASSWORD=$(openssl rand -base64 24)
+EZDL_PORT=8000
+EZDL_DOWNLOADS_DIR=$PWD/downloads
+PUID=$(id -u)
+PGID=$(id -g)
+COMPOSE_PROFILES=autoupdate
+EOF
+
+docker compose up -d
+```
+
+Cette voie n'a **pas** de section `build:` : elle tire l'image publiée. Pour builder localement
+(développement, variante GPU), utiliser le dépôt cloné et son `docker-compose.yml` racine —
+c'est la section suivante.
+
 ## Docker Compose
 
 ```bash

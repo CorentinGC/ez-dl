@@ -85,6 +85,59 @@ that is non-root end to end, set `user:` in the compose file — the entrypoint 
 `root`, attempts no ownership change and execs the command directly; providing already-writable
 volumes is then up to you.
 
+## One-command installation (easy path)
+
+For a server that only runs ez-dl, without cloning the repository:
+
+```bash
+curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh | sh
+```
+
+The script downloads the standalone compose file of the latest release, **verifies its SHA-256
+checksum**, generates a strong password into a `0600` `.env`, creates the downloads folder, starts
+the stack and waits for `/api/health`. It asks no questions and never uses `sudo`; everything is
+configured through environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `EZDL_DIR` | `~/ez-dl` | Installation folder |
+| `EZDL_PORT` | `8000` | Port published on the host |
+| `EZDL_DOWNLOADS_DIR` | `$EZDL_DIR/downloads` | Download destination |
+| `EZDL_PASSWORD` | generated | Force a password instead of generating one |
+| `EZDL_TAG` | `latest` | Image tag (`0.1.0`, `edge`…) |
+| `EZDL_AUTOUPDATE` | `true` | Watchtower auto-update service |
+
+`sh install.sh --dry-run` shows what it would do without writing anything. Run again on an
+existing installation, the script switches to **update mode**: it leaves the `.env` alone, so the
+password is preserved.
+
+A script pulled from the network and executed deserves a read first: `curl -fsSL <url> | less`.
+It is a frozen release asset, not a file from the `main` branch.
+
+### Manual equivalent
+
+```bash
+mkdir -p ~/ez-dl && cd ~/ez-dl
+curl -fsSLO https://github.com/CorentinGC/ez-dl/releases/latest/download/docker-compose.yml
+curl -fsSLO https://github.com/CorentinGC/ez-dl/releases/latest/download/docker-compose.yml.sha256
+sha256sum -c docker-compose.yml.sha256      # macOS: shasum -a 256 -c
+
+mkdir -p downloads
+umask 077 && cat > .env <<EOF
+EZDL_PASSWORD=$(openssl rand -base64 24)
+EZDL_PORT=8000
+EZDL_DOWNLOADS_DIR=$PWD/downloads
+PUID=$(id -u)
+PGID=$(id -g)
+COMPOSE_PROFILES=autoupdate
+EOF
+
+docker compose up -d
+```
+
+This path has **no** `build:` section: it pulls the published image. To build locally (development,
+GPU variant), use the cloned repository and its root `docker-compose.yml` — the next section.
+
 ## Docker Compose
 
 ```bash
