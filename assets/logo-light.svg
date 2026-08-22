@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" width="120" height="40" role="img" aria-label="ez-dl">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 40" width="132" height="40" role="img" aria-label="ez-dl">
   <title>ez-dl</title>
   <!-- Lockup pour fond CLAIR (README GitHub en thème clair). Glyphe repris de icon.svg.
-       Le wordmark s'appuie sur une pile de polices système : sa largeur est verrouillée par
-       textLength pour qu'un repli de police chez le lecteur ne décale jamais la mise en page. -->
+       Le wordmark s'appuie sur une pile de polices système, sans textLength : forcer la largeur
+       étalait le tracking de façon visible. La viewBox est plus large que le texte naturel, si
+       bien qu'un repli de police ne change qu'une marge droite, jamais la mise en page. -->
   <g transform="translate(0 2) scale(1.5)">
     <rect width="24" height="24" rx="5" fill="#2563eb"/>
     <g color="#ffffff">
@@ -11,7 +12,7 @@
       <path d="M3.6 17.4V19.8H20.4V17.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
   </g>
-  <text x="46" y="28" textLength="70" lengthAdjust="spacing"
+  <text x="46" y="28"
         font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
         font-size="26" font-weight="700" fill="#0f172a">ez-dl</text>
 </svg>
