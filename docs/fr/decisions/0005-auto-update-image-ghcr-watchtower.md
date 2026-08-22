@@ -1,7 +1,13 @@
 # ADR 0005 — Auto-update du serveur par image GHCR + watchtower
 
-- **Statut** : acceptée
+- **Statut** : acceptée, amendée
 - **Date** : 2026-08-22
+- **Amendée le 2026-08-22** par
+  [ADR 0006 — Versionnement et canaux de publication](0006-versionnement-et-canaux-de-publication.md),
+  sur trois points : `latest` ne suit plus chaque commit vert de `main` mais uniquement les tags
+  git semver (`main` alimente désormais `edge` et `main-<sha>`) ; l'image est publiée en amd64
+  **et** arm64 ; `PUID`/`PGID` sont devenus des réglages d'exécution, si bien que les hôtes à UID
+  ≠ 1000 n'ont plus besoin de la voie build local. Le reste de cette décision tient.
 
 ## Contexte
 

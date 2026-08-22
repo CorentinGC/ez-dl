@@ -282,12 +282,24 @@ Two Makefile targets frame the operation: `make zip-extension` (produce the zip 
 ## Automatic server updates
 
 Two paths, mutually exclusive
-(see [ADR 0005](decisions/0005-auto-update-image-ghcr-watchtower.md)).
+(see [ADR 0005](decisions/0005-auto-update-image-ghcr-watchtower.md), amended by
+[ADR 0006](decisions/0006-versionnement-et-canaux-de-publication.md)).
+
+What you follow depends on the tag you pick:
+
+| Tag | Contents | Audience |
+|---|---|---|
+| `latest` (default), `X.Y.Z`, `X.Y` | tagged releases only | deployments — recommended |
+| `edge`, `main-<sha>` | every green commit on `main` | people following the repository closely |
+
+So `latest` does **not** follow `main`: a deployment only moves on published releases. To get
+continuous tracking back, set `EZDL_IMAGE=ghcr.io/corentingc/ez-dl:edge` in the `.env`.
 
 ### Recommended path — integrated into the Docker stack (GHCR image + watchtower)
 
-CI publishes the production image to `ghcr.io/corentingc/ez-dl:latest` on every green push to
-`main`. The compose file ships a **watchtower** service (profile `autoupdate`) that polls the
+CI publishes the production image to GHCR for **amd64 and arm64** (`latest` on semver tags,
+`edge` on `main`). The compose file ships a **watchtower** service (profile `autoupdate`) that
+polls the
 registry (default: every 5 min, `EZDL_AUTO_UPDATE_INTERVAL_SECONDS`) and recreates the `server`
 container identically when a new image exists. Nothing to install on the host:
 

@@ -18,6 +18,9 @@
   routes publiques `/extension`, signature à l'exécution, clé persistée.
 - [ADR 0005 — Auto-update par image GHCR + watchtower](docs/fr/decisions/0005-auto-update-image-ghcr-watchtower.md) :
   CI publie l'image, watchtower opt-in (profil `autoupdate`) la tire.
+- [ADR 0006 — Versionnement et canaux de publication](docs/fr/decisions/0006-versionnement-et-canaux-de-publication.md) :
+  version unique lue depuis `pyproject.toml`, publication déclenchée par un tag git semver,
+  image multi-arch amd64+arm64, `PUID`/`PGID` en réglage d'exécution. Amende l'ADR 0005.
 - [Module — Détection](docs/fr/modules/detection.md) : yt-dlp probe, filtrage/tri des formats,
   sniffing réseau, règles apprises.
 - [Module — Conversion](docs/fr/modules/conversion.md) : presets ffmpeg, détection des encodeurs.
@@ -36,6 +39,7 @@
 - [ADR 0003 — Password auth](docs/en/decisions/0003-auth-mot-de-passe.md)
 - [ADR 0004 — Extension distribution as CRX](docs/en/decisions/0004-distribution-extension-crx.md)
 - [ADR 0005 — Auto-update through GHCR image + watchtower](docs/en/decisions/0005-auto-update-image-ghcr-watchtower.md)
+- [ADR 0006 — Versioning and release channels](docs/en/decisions/0006-versionnement-et-canaux-de-publication.md)
 - [Module — Detection](docs/en/modules/detection.md)
 - [Module — Conversion](docs/en/modules/conversion.md)
 - [Module — Learning mode](docs/en/modules/apprentissage.md)

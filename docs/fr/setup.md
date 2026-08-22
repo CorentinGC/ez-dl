@@ -286,12 +286,24 @@ Deux cibles Makefile encadrent l'opération : `make zip-extension` (produire le 
 ## Mise à jour automatique du serveur
 
 Deux voies, exclusives l'une de l'autre
-(voir [ADR 0005](decisions/0005-auto-update-image-ghcr-watchtower.md)).
+(voir [ADR 0005](decisions/0005-auto-update-image-ghcr-watchtower.md), amendée par
+[ADR 0006](decisions/0006-versionnement-et-canaux-de-publication.md)).
+
+Ce que vous suivez dépend du tag choisi :
+
+| Tag | Contenu | Pour qui |
+|---|---|---|
+| `latest` (défaut), `X.Y.Z`, `X.Y` | versions taguées uniquement | déploiements — recommandé |
+| `edge`, `main-<sha>` | chaque commit vert sur `main` | qui suit le dépôt de près |
+
+`latest` ne suit donc **pas** `main` : un déploiement ne bouge qu'aux versions publiées. Pour
+retrouver le suivi continu, fixer `EZDL_IMAGE=ghcr.io/corentingc/ez-dl:edge` dans le `.env`.
 
 ### Voie recommandée — intégrée au stack Docker (image GHCR + watchtower)
 
-La CI publie l'image de production sur `ghcr.io/corentingc/ez-dl:latest` à chaque push vert sur
-`main`. Le compose embarque un service **watchtower** (profil `autoupdate`) qui vérifie le
+La CI publie l'image de production sur GHCR en **amd64 et arm64** (`latest` sur les tags semver,
+`edge` sur `main`). Le compose embarque un service **watchtower** (profil `autoupdate`) qui
+vérifie le
 registre (défaut : toutes les 5 min, `EZDL_AUTO_UPDATE_INTERVAL_SECONDS`) et recrée le conteneur
 `server` à l'identique quand une nouvelle image existe. Rien à installer sur l'hôte :
 

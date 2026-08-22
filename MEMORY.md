@@ -7,10 +7,15 @@ Ne pas laisser grossir au-delà de ~150 lignes : archiver les détails stables d
 
 Squelette complet et vérifié. **Poussé sur origin/main depuis le 2026-08-22** (jusqu'à `3a09d55` :
 fix @eaDir + CRX + update-check). Prod déployée sur helmut (voir « Pièges ») — redeploy en attente
-côté utilisateur. Auto-update du déploiement : **ADR 0005** — la CI publie l'image sur
-`ghcr.io/corentingc/ez-dl` (job `publish`, push main vert), service watchtower opt-in dans le
+côté utilisateur. Auto-update du déploiement : **ADR 0005**, **amendée par ADR 0006** — la CI publie l'image sur
+`ghcr.io/corentingc/ez-dl` en **amd64 + arm64**, service watchtower opt-in dans le
 compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local :
 `deploy/auto-update.sh` par cron (`EZDL_AUTO_UPDATE=true`), les deux voies sont exclusives.
+Canaux depuis ADR 0006 : `latest`/`X.Y.Z`/`X.Y` = tags git semver uniquement (workflow
+`release.yml`, déclenché par le push d'un tag, préparé par `scripts/release.sh`) ; `edge` et
+`main-<sha>` = chaque commit vert sur `main` (`ci.yml`). **Un déploiement sur `latest` se fige
+tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des réglages d'exécution
+(entrypoint root → chown → `gosu`), plus des ARG de build.
 
 - **Serveur** : routes `/api/{health,capabilities,probe,folders,jobs,jobs/events,rules}`, wrappers
   yt-dlp/ffmpeg, queue asyncio + SQLite, auth Bearer. `ruff` clean, **26 tests pytest** verts.
