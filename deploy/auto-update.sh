@@ -75,7 +75,12 @@ fi
 
 log "mise à jour ${local_rev:0:7} -> ${remote_rev:0:7} (${branch})"
 git pull --ff-only --quiet origin "${branch}"
-docker compose up -d --build server
+
+# EZDL_IMAGE forcé sur un nom LOCAL : `docker compose up --build` tague l'image construite
+# avec la valeur `image:` du service. Sans ça, le build local prendrait le nom
+# ghcr.io/corentingc/ez-dl:latest, et un `docker compose pull` ultérieur — ou watchtower —
+# remplacerait silencieusement une image GPU ou à réglages maison par celle du registre.
+EZDL_IMAGE=ez-dl-server:local docker compose up -d --build server
 
 # Vérification best effort : le serveur doit répondre sur /api/health (route publique).
 port="$(env_value EZDL_PORT 8000)"

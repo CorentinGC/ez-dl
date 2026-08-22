@@ -379,7 +379,9 @@ Pour les hôtes qui construisent l'image localement, `deploy/auto-update.sh` (la
 timer systemd) fetch la branche suivie et, si l'origin a avancé, fait `git pull --ff-only` puis
 rebuild **du seul service `server`**, avant de vérifier `/api/health`. Garde-fous : inactif sans
 `EZDL_AUTO_UPDATE=true` dans le `.env` du clone, refuse un clone avec des modifications locales,
-jamais de merge ni de reset, verrou anti-chevauchement.
+jamais de merge ni de reset, verrou anti-chevauchement. Le rebuild est tagué `ez-dl-server:local`
+et non avec le nom de l'image publiée : sans cette précaution, un `docker compose pull` — ou
+watchtower s'il était activé par erreur — remplacerait le build local par celui du registre.
 
 ```bash
 # 1. Activer le flag dans le .env du clone déployé

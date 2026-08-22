@@ -373,7 +373,9 @@ For hosts building the image locally, `deploy/auto-update.sh` (run from cron or 
 fetches the tracked branch and, when origin has moved, does `git pull --ff-only` then rebuilds
 **only the `server` service**, before checking `/api/health`. Safeguards: inactive without
 `EZDL_AUTO_UPDATE=true` in the clone's `.env`, refuses a clone with local changes, never merges
-or resets, holds an anti-overlap lock.
+or resets, holds an anti-overlap lock. The rebuild is tagged `ez-dl-server:local` rather than with
+the published image name: without that, a later `docker compose pull` — or watchtower if enabled
+by mistake — would replace the local build with the registry one.
 
 ```bash
 # 1. Enable the flag in the deployed clone's .env
