@@ -23,6 +23,8 @@
 - [Module — Conversion](docs/fr/modules/conversion.md) : presets ffmpeg, détection des encodeurs.
 - [Module — Apprentissage](docs/fr/modules/apprentissage.md) : picker DOM, corrélation réseau,
   règles de site.
+- [Module — Marque](docs/fr/modules/marque.md) : identité visuelle, palette, grille du
+  dessin, fichiers générés, routes publiques de favicon, régénération via `make assets`.
 
 ## Documentation (EN — mirror)
 
@@ -37,6 +39,7 @@
 - [Module — Detection](docs/en/modules/detection.md)
 - [Module — Conversion](docs/en/modules/conversion.md)
 - [Module — Learning mode](docs/en/modules/apprentissage.md)
+- [Module — Brand](docs/en/modules/marque.md)
 
 ## Agent
 
