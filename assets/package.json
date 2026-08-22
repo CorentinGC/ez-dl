@@ -1,0 +1,13 @@
+{
+  "name": "ez-dl-assets",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chaîne de rendu des assets de marque ez-dl : SVG maîtres vers PNG et ICO. Isolée du serveur et de l'extension — ni leur CI ni le build Docker ne l'installent.",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

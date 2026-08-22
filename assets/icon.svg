@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="ez-dl">
+  <title>ez-dl</title>
+  <!-- RÉFÉRENCE GÉOMÉTRIQUE de la marque : logo-light.svg, logo-dark.svg et social-preview.svg
+       réembarquent ces trois formes à l'identique. Toute retouche doit y être répercutée.
+
+       Tuile pleine page : Chrome n'arrondit pas les icônes d'extension, l'arrondi fait partie du
+       dessin. Glyphe : flèche descendante plongeant dans un bac ouvert (« télécharger vers mon
+       stockage »). La flèche est PLEINE et non tracée — sous 24 px, une pointe en chevron se
+       confond avec sa hampe et le glyphe se lit comme une croix. Le bac reste tracé : c'est un
+       contenant, pas une masse. La couleur vient de l'attribut color du groupe parent. -->
+  <rect width="24" height="24" rx="5" fill="#2563eb"/>
+  <g color="#ffffff">
+    <rect x="10.6" y="3.2" width="2.8" height="6.8" rx="1.4" fill="currentColor"/>
+    <path d="M7.2 9.2h9.6L12 14z" fill="currentColor"/>
+    <path d="M3.6 17.4V19.8H20.4V17.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

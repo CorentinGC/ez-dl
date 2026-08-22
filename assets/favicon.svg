@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="ez-dl">
+  <title>ez-dl</title>
+  <!-- Favicon vectoriel : la tuile suit le thème du navigateur, comme l'accent de la popup.
+       Chrome et Firefox appliquent le CSS embarqué dans un favicon SVG ; les autres n'affichent
+       que la couleur claire, ce qui reste correct. Le repli .ico couvre les navigateurs sans SVG.
+       Géométrie hintée (celle de icon-small.svg) : un favicon s'affiche à 16 px dans l'onglet. -->
+  <style>
+    .tile { fill: #2563eb; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #3b82f6; }
+    }
+  </style>
+  <rect class="tile" width="24" height="24" rx="5"/>
+  <g color="#ffffff">
+    <rect x="10.5" y="1.5" width="3" height="7" rx="1.5" fill="currentColor"/>
+    <path d="M7.5 7.5h9L12 12.75z" fill="currentColor"/>
+    <path d="M3 16.5V20.25H21V16.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

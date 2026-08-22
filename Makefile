@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev-server dev-extension test lint build-extension zip-extension publish-extension up up-gpu down logs rebuild
+.PHONY: help install assets dev-server dev-extension test lint build-extension zip-extension publish-extension up up-gpu down logs rebuild
 
 help: ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -11,6 +11,9 @@ help: ## Affiche cette aide
 install: ## Installe les dépendances serveur (uv) et extension (npm)
 	cd server && uv sync
 	cd extension && npm install
+
+assets: ## Régénère icônes, favicon et logos depuis les SVG de assets/
+	cd assets && npm install && npm run render
 
 dev-server: ## Lance le serveur FastAPI en local avec rechargement à chaud
 	cd server && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

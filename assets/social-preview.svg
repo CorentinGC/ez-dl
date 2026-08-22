@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img"
+     aria-label="ez-dl — self-hosted video downloads, one click from your browser">
+  <title>ez-dl</title>
+  <!-- Aperçu social GitHub (Settings > General > Social preview). Format imposé : 1280x640.
+       Tout le contenu utile reste dans les 120 px de marge : les vignettes Slack/Discord
+       recadrent les bords. Fond sombre parce que l'aperçu s'affiche sur des fonds variables et
+       qu'un fond clair se confond avec l'interface des messageries. -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="34%" r="46%">
+      <stop offset="0%" stop-color="#2563eb" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#2563eb" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="#0b1220"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- Marque, 168 px, centrée horizontalement : (1280 - 168) / 2 = 556. -->
+  <g transform="translate(556 96) scale(7)">
+    <rect width="24" height="24" rx="5" fill="#3b82f6"/>
+    <g color="#0b1220">
+      <rect x="10.6" y="3.2" width="2.8" height="6.8" rx="1.4" fill="currentColor"/>
+      <path d="M7.2 9.2h9.6L12 14z" fill="currentColor"/>
+      <path d="M3.6 17.4V19.8H20.4V17.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+     text-anchor="middle">
+    <text x="640" y="386" font-size="104" font-weight="700" fill="#f8fafc">ez-dl</text>
+    <text x="640" y="446" font-size="34" font-weight="500" fill="#94a3b8">Self-hosted video downloads, one click from your browser.</text>
+    <text x="640" y="536" font-size="26" font-weight="400" fill="#64748b">Chrome MV3 · FastAPI · yt-dlp · ffmpeg · PolyForm Noncommercial</text>
+  </g>
+</svg>

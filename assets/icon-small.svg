@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="ez-dl">
+  <title>ez-dl</title>
+  <!-- Variante hintée, RÉSERVÉE aux rendus 16 et 32 px (barre d'outils Chrome, onglet).
+       Même construction que icon.svg — hampe pleine, pointe pleine, bac tracé — mais épaissie et
+       recalée : le bac passe à 3u de trait (à 16 px, 2.4u tombe à 1,6 px et devient un gris flou)
+       et la flèche est resserrée pour dégager 2 px d'écart avec le bac. Toutes les coordonnées
+       placent les bords des formes sur des pixels ENTIERS de la grille 16 px (1u = 2/3 px) :
+       sinon l'anticrénelage étale chaque trait sur deux rangées et double son épaisseur en gris. -->
+  <rect width="24" height="24" rx="5" fill="#2563eb"/>
+  <g color="#ffffff">
+    <rect x="10.5" y="1.5" width="3" height="7" rx="1.5" fill="currentColor"/>
+    <path d="M7.5 7.5h9L12 12.75z" fill="currentColor"/>
+    <path d="M3 16.5V20.25H21V16.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

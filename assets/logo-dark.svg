@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" width="120" height="40" role="img" aria-label="ez-dl">
+  <title>ez-dl</title>
+  <!-- Lockup pour fond SOMBRE. Seules la teinte de la tuile et la couleur du wordmark changent :
+       la géométrie est strictement identique à logo-light.svg. -->
+  <g transform="translate(0 2) scale(1.5)">
+    <rect width="24" height="24" rx="5" fill="#3b82f6"/>
+    <g color="#0b1220">
+      <rect x="10.6" y="3.2" width="2.8" height="6.8" rx="1.4" fill="currentColor"/>
+      <path d="M7.2 9.2h9.6L12 14z" fill="currentColor"/>
+      <path d="M3.6 17.4V19.8H20.4V17.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <text x="46" y="28" textLength="70" lengthAdjust="spacing"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="26" font-weight="700" fill="#f8fafc">ez-dl</text>
+</svg>
