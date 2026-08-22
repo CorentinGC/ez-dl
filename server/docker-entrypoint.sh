@@ -22,7 +22,10 @@ set -eu
 
 APP_USER=ezdl
 
-log() { printf '[ez-dl] %s\n' "$*"; }
+# Toute la journalisation de l'entrypoint part sur stderr : stdout appartient à la
+# commande exécutée ensuite. Sans ça, un `docker run … id -u` capture les lignes de
+# l'entrypoint en plus de sa propre sortie (cf. assertion de privilèges en CI).
+log() { printf '[ez-dl] %s\n' "$*" >&2; }
 warn() { printf '[ez-dl] ATTENTION : %s\n' "$*" >&2; }
 
 # --- Résolution des identifiants ---------------------------------------------------

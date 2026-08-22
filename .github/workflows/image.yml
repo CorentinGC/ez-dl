@@ -84,7 +84,9 @@ jobs:
         # Le conteneur démarre root pour aligner PUID/PGID puis droppe : rien
         # d'applicatif ne doit tourner en root (cf. SECURITY.md).
         run: |
-          uid="$(docker run --rm -e PUID=1027 -e PGID=100 ez-dl-server:ci id -u)"
+          # tail -n1 : l'entrypoint journalise sur stderr, mais la commande exécutée
+          # reste maîtresse de stdout — on ne dépend pas du silence de l'entrypoint.
+          uid="$(docker run --rm -e PUID=1027 -e PGID=100 ez-dl-server:ci id -u | tail -n1)"
           test "$uid" = "1027"
 
       - name: Build de l'image serveur sans l'extension (repli dégradé)
