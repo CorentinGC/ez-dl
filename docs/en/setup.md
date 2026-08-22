@@ -53,6 +53,7 @@ root for the template with generic values).
 | `EZDL_FFMPEG_BINARY` | `ffmpeg` | Path to the ffmpeg binary |
 | `EZDL_CORS_ORIGINS` | `chrome-extension://*` | Allowed origins |
 | `EZDL_LOG_LEVEL` | `info` | Log level |
+| `EZDL_AUTO_UPDATE` | `false` | Read by `deploy/auto-update.sh` **on the host** (not by the server): `true` enables automatic deployment updates — see [Automatic server updates](#automatic-server-updates) |
 
 Generic example of `EZDL_DOWNLOAD_ROOTS` for a NAS: `Movies=/mnt/media/movies,Series=/mnt/media/tv`.
 
@@ -185,6 +186,29 @@ Two Makefile targets frame the operation: `make zip-extension` (produce the zip 
    generated and displayed at startup), then use the **Test connection** button.
 4. The password is stored on the extension side in `chrome.storage.local` and sent as
    `Authorization: Bearer <password>` with every request.
+
+## Automatic server updates
+
+On a deployment host (git clone + `docker compose`), `deploy/auto-update.sh` keeps the server
+current without manual steps: run it regularly from cron (or a systemd timer); it fetches the
+tracked branch and, when origin has moved, does `git pull --ff-only` then rebuilds **only the
+`server` service** (`docker compose up -d --build server` — profile-gated services such as a
+tunnel are left alone). It then checks that `/api/health` answers.
+
+Safeguards: it does nothing unless `EZDL_AUTO_UPDATE=true` is set in the clone's `.env` (the flag
+turns it off without touching cron), refuses a clone with local changes, never merges or resets
+(`--ff-only` only), and holds a lock so overlapping runs abort.
+
+```bash
+# 1. Enable the flag in the deployed clone's .env
+echo 'EZDL_AUTO_UPDATE=true' >> .env
+
+# 2. Schedule the check (here: every 15 minutes)
+crontab -e
+# */15 * * * * /path/to/clone/deploy/auto-update.sh >> ~/.local/state/ez-dl-update.log 2>&1
+```
+
+The script is silent when there is nothing to do: the log only contains updates and errors.
 
 ## Verification
 

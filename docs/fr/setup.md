@@ -53,6 +53,7 @@ racine pour le gabarit avec valeurs génériques).
 | `EZDL_FFMPEG_BINARY` | `ffmpeg` | Chemin du binaire ffmpeg |
 | `EZDL_CORS_ORIGINS` | `chrome-extension://*` | Origines autorisées |
 | `EZDL_LOG_LEVEL` | `info` | Niveau de log |
+| `EZDL_AUTO_UPDATE` | `false` | Lue par `deploy/auto-update.sh` **côté hôte** (pas par le serveur) : `true` active la mise à jour automatique du déploiement — voir [Mise à jour automatique du serveur](#mise-à-jour-automatique-du-serveur) |
 
 Exemple générique de `EZDL_DOWNLOAD_ROOTS` pour un NAS : `Films=/mnt/media/movies,Séries=/mnt/media/tv`.
 
@@ -182,6 +183,31 @@ Deux cibles Makefile encadrent l'opération : `make zip-extension` (produire le 
    généré et affiché au démarrage), puis utiliser le bouton **Tester la connexion**.
 4. Le mot de passe est stocké côté extension dans `chrome.storage.local` et envoyé en
    `Authorization: Bearer <mot de passe>` à chaque requête.
+
+## Mise à jour automatique du serveur
+
+Sur un hôte de déploiement (clone git + `docker compose`), `deploy/auto-update.sh` maintient le
+serveur à jour sans intervention : lancé régulièrement par cron (ou un timer systemd), il fetch la
+branche suivie et, si l'origin a avancé, fait `git pull --ff-only` puis rebuild **du seul service
+`server`** (`docker compose up -d --build server` — les services à profil comme un tunnel ne sont
+pas touchés). Il vérifie ensuite que `/api/health` répond.
+
+Garde-fous : ne fait rien tant que `EZDL_AUTO_UPDATE=true` n'est pas posé dans le `.env` du clone
+(le flag se coupe sans toucher au cron), refuse un clone avec des modifications locales, jamais de
+merge ni de reset (`--ff-only` uniquement), verrou anti-chevauchement si un rebuild dure plus que
+l'intervalle.
+
+```bash
+# 1. Activer le flag dans le .env du clone déployé
+echo 'EZDL_AUTO_UPDATE=true' >> .env
+
+# 2. Programmer le check (ici toutes les 15 minutes)
+crontab -e
+# */15 * * * * /chemin/du/clone/deploy/auto-update.sh >> ~/.local/state/ez-dl-update.log 2>&1
+```
+
+Le script est silencieux quand il n'y a rien à faire : le log ne contient que les mises à jour et
+les erreurs.
 
 ## Vérification
 
