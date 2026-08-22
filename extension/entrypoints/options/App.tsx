@@ -1,6 +1,7 @@
 /**
- * Page d'options : serveurs enregistrés, puis configuration du serveur sélectionné (adresse,
- * dossiers favoris, preset par défaut, cookies) et gestion des règles de site apprises.
+ * Page d'options : préférences d'interface communes, serveurs enregistrés, puis configuration du
+ * serveur sélectionné (adresse, dossiers favoris, preset par défaut, cookies) et gestion des
+ * règles de site apprises.
  */
 
 import { useMemo } from 'react';
@@ -9,6 +10,7 @@ import { useCapabilities } from '@/src/hooks/useCapabilities';
 import { isServerConfigured } from '@/src/lib/storage';
 import { CookiesSection } from './components/CookiesSection';
 import { FoldersSection } from './components/FoldersSection';
+import { InterfaceSection } from './components/InterfaceSection';
 import { PresetSection } from './components/PresetSection';
 import { ProfilesSection } from './components/ProfilesSection';
 import { RulesSection } from './components/RulesSection';
@@ -32,6 +34,8 @@ export default function App() {
   return (
     <main className="options-root">
       <h1>Réglages ez-dl</h1>
+
+      <InterfaceSection />
 
       <ProfilesSection
         profiles={profiles}

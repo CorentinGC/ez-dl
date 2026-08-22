@@ -96,6 +96,47 @@ Le popup (`extension/entrypoints/popup/`) fusionne au moment de l'ouverture :
 Si aucune source ne remonte de résultat, le popup propose le bouton **« Aider à détecter »** qui
 lance le mode apprentissage.
 
+## Bouton de téléchargement en overlay (page visitée)
+
+Le content script ancre un bouton de téléchargement en haut à droite de la vidéo de la page, pour
+éviter l'aller-retour par la popup. Il n'apparaît **que si une source est confirmée** : jamais de
+bouton mort.
+
+**Conditions d'affichage**, toutes obligatoires :
+
+1. la préférence `showPageOverlay` est active (clé `uiPrefs` de `storage.local`, section
+   « Interface » de la page options — commune à tous les profils serveur) ;
+2. un serveur est configuré (URL + mot de passe) ;
+3. la page contient une `<video>` d'au moins **200 × 150 px** visible dans le viewport (seuils de
+   `src/lib/overlayGeometry.ts`, qui écartent pubs, GIF autoplay et pixels de tracking) ;
+4. le background confirme une source : des flux sniffés existent pour l'onglet, **ou** le probe
+   `/api/probe` sur l'URL de l'onglet renvoie au moins un format.
+
+**Coût serveur maîtrisé** : le probe n'est déclenché qu'en dernier recours (aucun flux sniffé), une
+seule fois par URL d'onglet — le résultat est mémorisé dans `TabState.quickProbe`, que la navigation
+efface avec le reste de l'état d'onglet. Les iframes d'une même page partagent la requête en vol.
+Quand un flux est sniffé après coup, le background pousse `OVERLAY_AVAILABLE` à l'onglet : le bouton
+apparaît sans nouvelle interrogation.
+
+**Au clic**, le job part avec les réglages par défaut du profil actif : meilleure qualité
+(`best_format_id`, sinon le format de plus haute résolution), dossier favori par défaut, preset par
+défaut, cookies si l'option est active. La sélection est faite par `src/lib/quickSource.ts`, module
+pur partagé avec la fiche source de la popup : les deux chemins proposent exactement le même nom de
+fichier et la même qualité pour une même page.
+
+**Répartition des responsabilités** — le content script ne fait que du DOM et de la messagerie :
+
+| Contexte | Rôle |
+|---|---|
+| `src/content/videoOverlay.ts` | suivi des `<video>`, positionnement, Shadow DOM, toast |
+| `entrypoints/background.ts` | routage `OVERLAY_CHECK` / `QUICK_DOWNLOAD`, poussée `OVERLAY_AVAILABLE` |
+| `src/lib/quickDownload.ts` | probe + cache, cookies, `POST /api/jobs` |
+
+Ni l'URL du serveur, ni le mot de passe, ni les cookies ne franchissent la frontière de la page : le
+content script ne reçoit qu'un booléen de disponibilité, puis un identifiant de job ou un message
+d'erreur. Le background ignore toute donnée envoyée par la page et ne se fie qu'à `sender.tab`.
+L'UI vit dans un Shadow DOM (styles isolés dans les deux sens) et se replie pendant le mode picker.
+
 ## Étendre la détection
 
 - **Nouveaux patterns réseau** : ajouter l'extension/content-type dans

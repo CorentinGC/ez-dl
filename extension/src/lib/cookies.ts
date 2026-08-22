@@ -1,10 +1,13 @@
 /**
  * Lecture des cookies du navigateur pour une URL donnée, au format structuré `CookieParam`
  * attendu par le serveur (schéma `CookieItem` — c'est lui qui écrit le cookie-jar yt-dlp).
- * Partagé entre `useSources` (probe authentifié) et `SourceCard` (job authentifié).
+ *
+ * Vit dans `src/lib` (et non dans la popup) parce que trois contextes en ont besoin : le probe
+ * authentifié et le job de la popup, et le téléchargement en un clic déclenché par l'overlay,
+ * qui s'exécute dans le service worker (un content script n'a pas accès à `browser.cookies`).
  */
 
-import type { CookieParam } from '@/src/lib/types';
+import type { CookieParam } from './types';
 
 export async function readCookiesForUrl(url: string): Promise<CookieParam[]> {
   const cookies = await browser.cookies.getAll({ url });

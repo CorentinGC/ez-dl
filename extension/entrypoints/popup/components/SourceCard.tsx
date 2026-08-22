@@ -6,10 +6,16 @@
 
 import { useCallback, useId, useMemo, useState } from 'react';
 import type { ApiClient } from '@/src/lib/api';
-import { buildDefaultFilename, sanitizeFilename } from '@/src/lib/filename';
-import type { ExtensionSettings, MediaKind, Preset, ProbeFormat } from '@/src/lib/types';
+import { sanitizeFilename } from '@/src/lib/filename';
+import {
+  defaultFilenameForMedia,
+  defaultFilenameForProbe,
+  resolveDefaultFolder,
+  sortFormatsBestFirst,
+} from '@/src/lib/quickSource';
+import type { ExtensionSettings, MediaKind, Preset } from '@/src/lib/types';
 import { FolderPicker } from './FolderPicker';
-import { readCookiesForUrl } from '../readCookies';
+import { readCookiesForUrl } from '@/src/lib/cookies';
 import type { Source } from '../types';
 
 interface SourceCardProps {
@@ -38,7 +44,7 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
   // Flux sniffé : URL effectivement téléchargée, modifiable via le choix de qualité.
   const [sniffedUrl, setSniffedUrl] = useState<string | null>(isProbe ? null : source.mediaUrl);
   const [filename, setFilename] = useState(() => computeDefaultFilename(source, pageTitle, defaultFormatId));
-  const [folder, setFolder] = useState<{ path: string; label: string } | null>(defaultFolder(settings));
+  const [folder, setFolder] = useState<{ path: string; label: string } | null>(resolveDefaultFolder(settings));
   const [presetId, setPresetId] = useState<string>(settings.defaultPresetId ?? presets[0]?.id ?? 'copy');
   const [sendCookies, setSendCookies] = useState(settings.sendCookies);
   const [expanded, setExpanded] = useState(false);
@@ -198,38 +204,17 @@ export function SourceCard({ source, apiClient, settings, presets, pageUrl, page
   );
 }
 
-function sortFormatsBestFirst(formats: ProbeFormat[]): ProbeFormat[] {
-  return [...formats].sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.tbr ?? 0) - (a.tbr ?? 0));
-}
-
+/** Défauts délégués à `quickSource` : la popup et le bouton en overlay doivent proposer le
+ * même nom de fichier pour une même source. */
 function computeDefaultFilename(source: Source, pageTitle: string, formatId: string | null): string {
   if (source.kind === 'probe') {
-    if (source.suggestedFilename) return sanitizeFilename(source.suggestedFilename);
-    const format = source.formats.find((f) => f.format_id === formatId);
-    return buildDefaultFilename({ videoTitle: source.title, pageTitle, ext: format?.ext ?? null });
+    return defaultFilenameForProbe(
+      { title: source.title, suggested_filename: source.suggestedFilename, formats: source.formats },
+      pageTitle,
+      formatId,
+    );
   }
-  return buildDefaultFilename({ videoTitle: source.title, pageTitle, ext: extensionForMediaKind(source.mediaKind) });
-}
-
-function extensionForMediaKind(kind: MediaKind): string | null {
-  switch (kind) {
-    case 'mp4':
-      return 'mp4';
-    case 'webm':
-      return 'webm';
-    case 'hls':
-    case 'dash':
-      return 'mp4'; // Conteneur de sortie typique après remux côté serveur.
-    default:
-      return null;
-  }
-}
-
-function defaultFolder(settings: ExtensionSettings): { path: string; label: string } | null {
-  const match = settings.favoriteFolders.find((f) => f.path === settings.defaultFolderPath);
-  if (match) return match;
-  const first = settings.favoriteFolders[0];
-  return first ? { path: first.path, label: first.label } : null;
+  return defaultFilenameForMedia(source.mediaKind, source.title, pageTitle);
 }
 
 function kindLabel(source: Source): string {

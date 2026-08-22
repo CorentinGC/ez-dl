@@ -135,6 +135,19 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
       `assets/social-preview.png` dans *Settings → General → Social preview* du dépôt GitHub —
       aucun fichier du dépôt ne pilote cet aperçu. 162 tests pytest. 2026-08-22.
 
+- [x] `ez-dl-773` : bouton de téléchargement en overlay sur les vidéos de la page — content script
+      (Shadow DOM, `<video>` ≥ 200×150 visible, plein écran, replié pendant le picker) qui n'affiche
+      le bouton que si le background confirme une source : flux sniffés, sinon probe `/api/probe`
+      **une seule fois par URL d'onglet** (cache `TabState.quickProbe`, effacé à la navigation,
+      requêtes des iframes fusionnées) ; poussée `OVERLAY_AVAILABLE` quand un flux est sniffé après
+      coup. Clic = job avec les défauts du profil actif, orchestré par `src/lib/quickDownload.ts`
+      côté service worker (le content script ne voit ni URL serveur, ni mot de passe, ni cookies —
+      juste un booléen puis un id de job ; le background ne se fie qu'à `sender.tab`). Défauts
+      factorisés dans `src/lib/quickSource.ts`, partagés avec `SourceCard`. Réglage global
+      `showPageOverlay` (clé `uiPrefs`, hors profils) + section « Interface » des options.
+      `readCookies` déplacé de `entrypoints/popup/` vers `src/lib/cookies.ts`. 191 tests Vitest.
+      Validé en réel par l'utilisateur. 2026-08-22.
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.

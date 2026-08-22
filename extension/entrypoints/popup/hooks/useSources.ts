@@ -10,7 +10,7 @@ import { createApiClient, NetworkError, ServerError, UnauthorizedError, toApiCon
 import { collapseVariantPlaylists, groupQualityVariants } from '@/src/lib/detection';
 import type { GetTabStateRequest, GetTabStateResponse } from '@/src/lib/messaging';
 import type { ExtensionSettings, PickedElementInfo, ProbeResponse } from '@/src/lib/types';
-import { readCookiesForUrl } from '../readCookies';
+import { readCookiesForUrl } from '@/src/lib/cookies';
 import type { ActiveTabInfo } from './useActiveTab';
 import type { ProbeSource, Source } from '../types';
 

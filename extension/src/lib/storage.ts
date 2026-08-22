@@ -18,6 +18,7 @@ export const EMPTY_TAB_STATE: TabState = {
   candidates: [],
   pageInfo: null,
   pickedElement: null,
+  quickProbe: null,
   updatedAt: 0,
 };
 

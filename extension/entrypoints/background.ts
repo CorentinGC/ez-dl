@@ -21,10 +21,13 @@ import type {
   BackgroundRequest,
   ContentRequest,
   GetTabStateResponse,
+  OverlayCheckResponse,
+  QuickDownloadResponse,
   SaveRuleResponse,
   TabStateUpdatedMessage,
 } from '@/src/lib/messaging';
 import { hasActiveServerChanged } from '@/src/lib/profiles';
+import { resolveOverlayAvailability, runQuickDownload } from '@/src/lib/quickDownload';
 import {
   EMPTY_TAB_STATE,
   RULES_CACHE_TTL_MS,
@@ -160,6 +163,7 @@ async function mergeCandidate(tabId: number, candidate: MediaCandidate): Promise
   await setTabState(tabId, { ...state, candidates, updatedAt: Date.now() });
   await refreshBadgeIfActive(tabId, candidates.length);
   broadcastTabStateUpdated(tabId, candidates.length);
+  notifyOverlayAvailable(tabId);
 }
 
 /** Règles apprises applicables au domaine d'une URL, avec cache TTL dans storage.session. */
@@ -245,6 +249,10 @@ async function handleMessage(message: BackgroundRequest, sender: Browser.runtime
       return handlePickedElement(sender.tab?.id, message);
     case 'PICKER_CANCELLED':
       return { ok: true };
+    case 'OVERLAY_CHECK':
+      return handleOverlayCheck(sender.tab);
+    case 'QUICK_DOWNLOAD':
+      return handleQuickDownload(sender.tab);
     default:
       return { ok: false, error: 'Message inconnu.' };
   }
@@ -315,6 +323,27 @@ async function handleSaveRule(
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
   }
+}
+
+/**
+ * Le content script ne fournit aucune donnée : l'onglet et son URL viennent de `sender`, jamais
+ * de la page — sinon n'importe quel script de la page pourrait faire sonder une URL arbitraire.
+ */
+async function handleOverlayCheck(tab: Browser.tabs.Tab | undefined): Promise<OverlayCheckResponse> {
+  if (tab?.id === undefined || !tab.url) return { available: false };
+  return { available: await resolveOverlayAvailability(tab.id, tab.url) };
+}
+
+async function handleQuickDownload(tab: Browser.tabs.Tab | undefined): Promise<QuickDownloadResponse> {
+  if (tab?.id === undefined || !tab.url) return { ok: false, error: 'Onglet introuvable.' };
+  return runQuickDownload(tab.id, tab.url);
+}
+
+/** Signale au content script qu'une source vient d'apparaître (flux sniffé après chargement). */
+function notifyOverlayAvailable(tabId: number): void {
+  browser.tabs.sendMessage(tabId, { type: 'OVERLAY_AVAILABLE' } satisfies ContentRequest).catch(() => {
+    // Pas de content script injecté sur cet onglet (page interne, extension rechargée) : normal.
+  });
 }
 
 function errorMessage(error: unknown): string {

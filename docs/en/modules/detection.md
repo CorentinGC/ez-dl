@@ -95,6 +95,45 @@ The popup (`extension/entrypoints/popup/`) merges, at open time:
 If no source returns a result, the popup offers the **"Help detect"** button, which launches
 learning mode.
 
+## Page overlay download button (visited page)
+
+The content script anchors a download button to the top-right corner of the page's video, removing
+the round trip through the popup. It only shows up **when a source is confirmed** — never a dead
+button.
+
+**Display conditions**, all required:
+
+1. the `showPageOverlay` preference is on (`uiPrefs` key in `storage.local`, "Interface" section of
+   the options page — shared across all server profiles);
+2. a server is configured (URL + password);
+3. the page holds a `<video>` of at least **200 × 150 px** visible in the viewport (thresholds in
+   `src/lib/overlayGeometry.ts`, which rule out ads, autoplay GIFs and tracking pixels);
+4. the background confirms a source: sniffed streams exist for the tab, **or** the `/api/probe` call
+   on the tab URL returns at least one format.
+
+**Bounded server cost**: the probe is only a last resort (no sniffed stream), once per tab URL — the
+result is cached in `TabState.quickProbe`, which navigation clears along with the rest of the tab
+state. Iframes of the same page share the in-flight request. When a stream is sniffed later, the
+background pushes `OVERLAY_AVAILABLE` to the tab, so the button appears without another round trip.
+
+**On click**, the job is sent with the active profile's defaults: best quality (`best_format_id`,
+otherwise the highest-resolution format), default favourite folder, default preset, cookies if the
+option is on. The selection is done by `src/lib/quickSource.ts`, a pure module shared with the
+popup's source card: both paths propose the exact same filename and quality for a given page.
+
+**Separation of concerns** — the content script only touches the DOM and messaging:
+
+| Context | Role |
+|---|---|
+| `src/content/videoOverlay.ts` | `<video>` tracking, positioning, Shadow DOM, toast |
+| `entrypoints/background.ts` | `OVERLAY_CHECK` / `QUICK_DOWNLOAD` routing, `OVERLAY_AVAILABLE` push |
+| `src/lib/quickDownload.ts` | probe + cache, cookies, `POST /api/jobs` |
+
+Neither the server URL, nor the password, nor the cookies ever cross the page boundary: the content
+script only receives an availability boolean, then a job id or an error message. The background
+ignores any data sent by the page and trusts `sender.tab` only. The UI lives in a Shadow DOM (styles
+isolated both ways) and steps aside while the picker mode is active.
+
 ## Extending detection
 
 - **New network patterns**: add the extension/content-type in `extension/lib/sniffer.ts`, with an

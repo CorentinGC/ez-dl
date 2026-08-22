@@ -1,17 +1,23 @@
 /**
- * Content script : extrait le titre de page / balises OpenGraph / éléments `<video>`, et
- * fournit le mode picker DOM du mode apprentissage (surlignage au survol, clic pour choisir
- * l'élément vidéo/conteneur, Échap pour annuler).
+ * Content script : extrait le titre de page / balises OpenGraph / éléments `<video>`, monte le
+ * bouton de téléchargement en overlay sur les vidéos, et fournit le mode picker DOM du mode
+ * apprentissage (surlignage au survol, clic pour choisir l'élément vidéo/conteneur, Échap pour
+ * annuler).
  */
 
+import { markOverlayAvailable, mountVideoOverlay, setOverlaySuspended, unmountVideoOverlay } from '@/src/content/videoOverlay';
 import type { ContentRequest, PageInfoMessage, PickedElementMessage, PickerCancelledMessage } from '@/src/lib/messaging';
 import type { PageInfo, PickedElementInfo } from '@/src/lib/types';
+import { getUiPrefs, watchUiPrefs } from '@/src/lib/uiPrefs';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
   main() {
     void sendPageInfo();
+    void applyOverlayPref();
+    // La page options peut basculer le réglage pendant que la page est ouverte : on suit à chaud.
+    watchUiPrefs((prefs) => (prefs.showPageOverlay ? mountVideoOverlay() : unmountVideoOverlay()));
     // Certains lecteurs injectent leur <video> après le chargement initial (SPA) : on renvoie
     // un instantané une deuxième fois pour rattraper ce cas courant sans complexité excessive.
     window.addEventListener('load', () => void sendPageInfo());
@@ -36,7 +42,15 @@ function handleMessage(message: ContentRequest, sendResponse: (response?: unknow
     case 'GET_PAGE_INFO':
       sendResponse({ pageInfo: extractPageInfo() });
       return;
+    case 'OVERLAY_AVAILABLE':
+      markOverlayAvailable();
+      sendResponse({ ok: true });
+      return;
   }
+}
+
+async function applyOverlayPref(): Promise<void> {
+  if ((await getUiPrefs()).showPageOverlay) mountVideoOverlay();
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +121,7 @@ function activatePicker(): void {
   document.body.appendChild(hint);
 
   document.documentElement.style.cursor = 'crosshair';
+  setOverlaySuspended(true);
 
   const onMouseMove = (event: MouseEvent): void => {
     const target = event.target;
@@ -155,6 +170,7 @@ function deactivatePicker(): void {
   hint.remove();
   highlight.remove();
   document.documentElement.style.cursor = '';
+  setOverlaySuspended(false);
   pickerState = null;
 }
 

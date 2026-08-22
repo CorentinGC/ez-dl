@@ -9,7 +9,7 @@ import { type ApiClient, createApiClient, toApiConfig } from '@/src/lib/api';
 import { isActive } from '@/src/lib/jobStatus';
 import { isServerConfigured } from '@/src/lib/storage';
 import type { ExtensionSettings, Job } from '@/src/lib/types';
-import { readCookiesForUrl } from '../readCookies';
+import { readCookiesForUrl } from '@/src/lib/cookies';
 
 const POLL_INTERVAL_MS = 2000;
 

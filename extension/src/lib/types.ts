@@ -300,10 +300,24 @@ export interface PickedElementInfo {
 // Extension — état par onglet (storage.session)
 // ---------------------------------------------------------------------------
 
+/**
+ * Résultat mémorisé du probe déclenché par l'overlay de page, pour ne pas re-sonder le serveur
+ * à chaque `<video>` détectée ni au clic. Vit dans l'état d'onglet : la navigation l'efface.
+ */
+export interface QuickProbeCache {
+  /** URL d'onglet sondée — une redirection interne (SPA) invalide le cache. */
+  url: string;
+  /** Réponse du probe, `null` si le serveur n'a trouvé aucun extracteur exploitable. */
+  probe: ProbeResponse | null;
+  checkedAt: number;
+}
+
 export interface TabState {
   candidates: MediaCandidate[];
   pageInfo: PageInfo | null;
   pickedElement: PickedElementInfo | null;
+  /** Absent tant qu'aucun probe n'a été déclenché pour l'overlay sur cet onglet. */
+  quickProbe?: QuickProbeCache | null;
   updatedAt: number;
 }
 
