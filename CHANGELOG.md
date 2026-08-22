@@ -20,6 +20,11 @@ process, use it only if you follow the repository.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-22
+
+### Fixed
+
+- **ci** : tirer la version des tags d'image du tag publié, pas de github.ref (ez-dl-xkl) (ae72dc9)
 ## [0.1.0] - 2026-08-22
 
 First tagged release. Everything below already existed on `main`; this version is the point where
@@ -40,5 +45,6 @@ the project starts being published as versioned artifacts.
 - Opt-in auto-update inside the Docker stack (watchtower, `autoupdate` compose profile) and a host
   cron alternative for locally-built images.
 
-[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.0
