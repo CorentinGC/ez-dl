@@ -79,6 +79,11 @@ export interface PickerCancelledMessage {
  */
 export interface OverlayCheckRequest {
   type: 'OVERLAY_CHECK';
+  /**
+   * Au moins une vidéo de la page expose une URL média directe : elle est téléchargeable telle
+   * quelle, le background peut répondre sans dépenser un probe serveur.
+   */
+  hasDirectMedia: boolean;
 }
 
 export interface OverlayCheckResponse {
@@ -87,9 +92,21 @@ export interface OverlayCheckResponse {
   available: boolean;
 }
 
-/** Clic sur le bouton en overlay : crée un job avec tous les réglages par défaut. */
+/**
+ * Clic sur le bouton en overlay : crée un job avec tous les réglages par défaut.
+ *
+ * `clicked` décrit l'élément `<video>` réellement cliqué — indispensable dès qu'une page en
+ * contient plusieurs. Ces champs viennent de la page : le background les fait passer par
+ * `sanitizeClickedVideo` et ne s'en sert que pour choisir un média et un nom de fichier, jamais
+ * pour désigner l'onglet ou son URL.
+ */
 export interface QuickDownloadRequest {
   type: 'QUICK_DOWNLOAD';
+  clicked: {
+    mediaUrl: string | null;
+    title: string | null;
+    isOnlyVideo: boolean;
+  };
 }
 
 export type QuickDownloadResponse = { ok: true; jobId: string } | { ok: false; error: string };

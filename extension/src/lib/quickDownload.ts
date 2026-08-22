@@ -11,7 +11,7 @@
 import { createApiClient, toApiConfig } from './api';
 import { readCookiesForUrl } from './cookies';
 import type { QuickDownloadResponse } from './messaging';
-import { pickQuickSource, resolveDefaultFolder } from './quickSource';
+import { pickQuickSource, resolveDefaultFolder, sanitizeClickedVideo, type ClickedVideo } from './quickSource';
 import { getSettings, getTabState, isServerConfigured, setTabState } from './storage';
 import type { ExtensionSettings, ProbeResponse, QuickProbeCache, TabState } from './types';
 import { getUiPrefs } from './uiPrefs';
@@ -23,12 +23,19 @@ const probesInFlight = new Map<number, Promise<QuickProbeCache>>();
  * Une source est-elle téléchargeable sur cet onglet ? Le probe serveur n'est tenté qu'en dernier
  * recours (aucun flux sniffé), une seule fois par URL d'onglet grâce au cache d'état d'onglet.
  */
-export async function resolveOverlayAvailability(tabId: number, tabUrl: string): Promise<boolean> {
+export async function resolveOverlayAvailability(
+  tabId: number,
+  tabUrl: string,
+  hasDirectMedia: boolean,
+): Promise<boolean> {
   const prefs = await getUiPrefs();
   if (!prefs.showPageOverlay) return false;
 
   const settings = await getSettings();
   if (!isServerConfigured(settings) || !isProbeableUrl(tabUrl)) return false;
+
+  // Une vidéo qui expose son URL média est téléchargeable telle quelle : ni probe, ni sniffer.
+  if (hasDirectMedia) return true;
 
   const state = await getTabState(tabId);
   if (state.candidates.length > 0) return true;
@@ -38,7 +45,13 @@ export async function resolveOverlayAvailability(tabId: number, tabUrl: string):
 }
 
 /** Crée le job correspondant au clic sur le bouton : meilleure qualité et réglages par défaut. */
-export async function runQuickDownload(tabId: number, tabUrl: string): Promise<QuickDownloadResponse> {
+export async function runQuickDownload(
+  tabId: number,
+  tab: { url: string; title?: string },
+  rawClicked: unknown,
+): Promise<QuickDownloadResponse> {
+  const tabUrl = tab.url;
+  const clicked = sanitizeClickedVideo(rawClicked);
   const settings = await getSettings();
   if (!isServerConfigured(settings)) return { ok: false, error: 'Serveur ez-dl non configuré.' };
   if (!isProbeableUrl(tabUrl)) return { ok: false, error: 'Page non téléchargeable.' };
@@ -47,12 +60,15 @@ export async function runQuickDownload(tabId: number, tabUrl: string): Promise<Q
   if (!folder) return { ok: false, error: 'Aucun dossier favori : configurez-en un dans les options.' };
 
   const state = await getTabState(tabId);
-  const probe = await resolveProbe(tabId, tabUrl, state, settings);
+  const probe = await resolveProbe(tabId, tabUrl, state, clicked, settings);
   const source = pickQuickSource({
     probe,
     candidates: state.candidates,
     pageUrl: tabUrl,
-    pageTitle: state.pageInfo?.pageTitle ?? tabUrl,
+    // `sender.tab.title` est toujours frais, contrairement à l'instantané de page mémorisé, qui
+    // peut dater de la page précédente sur une navigation SPA.
+    pageTitle: tab.title?.trim() || state.pageInfo?.pageTitle || tabUrl,
+    clicked,
   });
   if (!source) return { ok: false, error: 'Aucune vidéo téléchargeable détectée sur cette page.' };
 
@@ -83,10 +99,15 @@ async function resolveProbe(
   tabId: number,
   tabUrl: string,
   state: TabState,
+  clicked: ClickedVideo | null,
   settings: ExtensionSettings,
 ): Promise<ProbeResponse | null> {
-  // Des flux sniffés suffisent : inutile de dépenser un probe serveur pour eux.
-  if (state.candidates.length > 0 && !isCacheFresh(state.quickProbe, tabUrl)) return null;
+  if (isCacheFresh(state.quickProbe, tabUrl)) return state.quickProbe?.probe ?? null;
+  // Page à plusieurs vidéos : le probe décrit la principale, pas celle qui a été cliquée — il ne
+  // servira à rien. Des flux sniffés suffisent aussi. Sur une vidéo unique en revanche le probe
+  // reste le meilleur chemin (qualités séparées, piste audio à réassembler).
+  if (clicked?.mediaUrl && !clicked.isOnlyVideo) return null;
+  if (state.candidates.length > 0) return null;
   return (await getOrRefreshProbe(tabId, tabUrl, state, settings)).probe;
 }
 

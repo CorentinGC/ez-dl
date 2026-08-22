@@ -158,6 +158,16 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
       `readCookies` déplacé de `entrypoints/popup/` vers `src/lib/cookies.ts`. 191 tests Vitest.
       Validé en réel par l'utilisateur. 2026-08-22.
 
+- [x] `ez-dl-egf` : deux défauts du bouton en overlay corrigés après usage réel — (1) le nom de
+      fichier tombait sur l'URL quand `pageInfo` était périmé : le titre vient désormais du DOM
+      autour de la vidéo cliquée (`src/lib/videoTitle.ts` pur + `src/content/videoTitleDom.ts`,
+      remontée de 8 ancêtres, filtrage des libellés de lecteur), avec repli `og:title` puis
+      `sender.tab.title` (toujours frais) ; (2) un seul badge sur la plus grande vidéo, et le clic
+      téléchargeait la source de la page : un badge par vidéo éligible (12 max) et le clic transmet
+      `currentSrc` + titre, assainis par `sanitizeClickedVideo` (schéma `http(s)`, longueurs
+      bornées). Priorité du média : vidéo cliquée si la page en a plusieurs, sinon probe, sinon
+      média cliqué, sinon flux sniffé. 212 tests Vitest. 2026-08-22.
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.

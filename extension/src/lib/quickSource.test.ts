@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultFilenameForMedia,
+  sanitizeClickedVideo,
   defaultFilenameForProbe,
   extensionForMediaKind,
   pickBestCandidate,
@@ -191,5 +192,108 @@ describe('resolveDefaultFolder', () => {
 
   it('rend null sans aucun favori', () => {
     expect(resolveDefaultFolder({ ...base, favoriteFolders: [], defaultFolderPath: null })).toBeNull();
+  });
+});
+
+describe('pickQuickSource — vidéo cliquée dans la page', () => {
+  const clicked = { mediaUrl: 'https://cdn.example/clip-42.mp4', title: 'Le clip 42', isOnlyVideo: false };
+
+  it('télécharge la vidéo cliquée plutôt que la source de la page quand il y en a plusieurs', () => {
+    const source = pickQuickSource({
+      probe: probe({ best_format_id: '137' }),
+      candidates: [candidate({ url: 'https://cdn.example/premiere.mp4' })],
+      pageUrl: PAGE_URL,
+      pageTitle: 'Titre de page',
+      clicked,
+    });
+    expect(source).toEqual({
+      url: 'https://cdn.example/clip-42.mp4',
+      formatId: null,
+      filename: 'Le clip 42.mp4',
+      title: 'Le clip 42',
+    });
+  });
+
+  it('garde le probe pour la seule vidéo de la page (qualités séparées, audio à réassembler)', () => {
+    const source = pickQuickSource({
+      probe: probe({ best_format_id: '137' }),
+      candidates: [],
+      pageUrl: PAGE_URL,
+      pageTitle: 'Titre de page',
+      clicked: { ...clicked, isOnlyVideo: true },
+    });
+    expect(source?.url).toBe(PAGE_URL);
+    expect(source?.formatId).toBe('137');
+  });
+
+  it('utilise le média de la vidéo unique quand aucun extracteur ne répond', () => {
+    const source = pickQuickSource({
+      probe: null,
+      candidates: [candidate({ url: 'https://cdn.example/autre.mp4' })],
+      pageUrl: PAGE_URL,
+      pageTitle: 'Titre de page',
+      clicked: { ...clicked, isOnlyVideo: true },
+    });
+    expect(source?.url).toBe('https://cdn.example/clip-42.mp4');
+  });
+
+  it('nomme un flux sniffé avec le titre trouvé près de la vidéo, pas celui de la page', () => {
+    const source = pickQuickSource({
+      probe: null,
+      candidates: [candidate({ url: 'https://cdn.example/master.m3u8', kind: 'hls' })],
+      pageUrl: PAGE_URL,
+      pageTitle: 'Titre de page',
+      clicked: { mediaUrl: null, title: 'Titre proche', isOnlyVideo: true },
+    });
+    expect(source).toEqual({
+      url: 'https://cdn.example/master.m3u8',
+      formatId: null,
+      filename: 'Titre proche.mp4',
+      title: 'Titre proche',
+    });
+  });
+
+  it('déduit l’extension du média cliqué', () => {
+    const hls = pickQuickSource({
+      probe: null,
+      candidates: [],
+      pageUrl: PAGE_URL,
+      pageTitle: 'Page',
+      clicked: { mediaUrl: 'https://cdn.example/live/master.m3u8', title: 'Direct', isOnlyVideo: false },
+    });
+    expect(hls?.filename).toBe('Direct.mp4');
+  });
+});
+
+describe('sanitizeClickedVideo', () => {
+  it('conserve une charge utile saine', () => {
+    expect(sanitizeClickedVideo({ mediaUrl: 'https://cdn.example/a.mp4', title: 'Titre', isOnlyVideo: true })).toEqual({
+      mediaUrl: 'https://cdn.example/a.mp4',
+      title: 'Titre',
+      isOnlyVideo: true,
+    });
+  });
+
+  it('rejette tout schéma autre que http(s) — blob, data, javascript, file', () => {
+    for (const mediaUrl of ['blob:https://site.example/abc', 'data:video/mp4;base64,AAAA', 'javascript:alert(1)', 'file:///etc/passwd']) {
+      expect(sanitizeClickedVideo({ mediaUrl, title: null, isOnlyVideo: false })?.mediaUrl).toBeNull();
+    }
+  });
+
+  it('rejette une URL démesurée', () => {
+    const mediaUrl = `https://cdn.example/${'a'.repeat(3000)}.mp4`;
+    expect(sanitizeClickedVideo({ mediaUrl, title: null, isOnlyVideo: false })?.mediaUrl).toBeNull();
+  });
+
+  it('ramène le titre à une ligne bornée et ignore les types inattendus', () => {
+    const sanitized = sanitizeClickedVideo({ mediaUrl: null, title: `  Un\ntitre  ${'x'.repeat(500)}`, isOnlyVideo: 'oui' });
+    expect(sanitized?.title?.startsWith('Un titre')).toBe(true);
+    expect(sanitized?.title).toHaveLength(200);
+    expect(sanitized?.isOnlyVideo).toBe(false);
+  });
+
+  it('rend null sur une charge utile absente', () => {
+    expect(sanitizeClickedVideo(undefined)).toBeNull();
+    expect(sanitizeClickedVideo('cassé')).toBeNull();
   });
 });

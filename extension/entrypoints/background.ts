@@ -250,9 +250,9 @@ async function handleMessage(message: BackgroundRequest, sender: Browser.runtime
     case 'PICKER_CANCELLED':
       return { ok: true };
     case 'OVERLAY_CHECK':
-      return handleOverlayCheck(sender.tab);
+      return handleOverlayCheck(sender.tab, message.hasDirectMedia);
     case 'QUICK_DOWNLOAD':
-      return handleQuickDownload(sender.tab);
+      return handleQuickDownload(sender.tab, message.clicked);
     default:
       return { ok: false, error: 'Message inconnu.' };
   }
@@ -329,14 +329,20 @@ async function handleSaveRule(
  * Le content script ne fournit aucune donnée : l'onglet et son URL viennent de `sender`, jamais
  * de la page — sinon n'importe quel script de la page pourrait faire sonder une URL arbitraire.
  */
-async function handleOverlayCheck(tab: Browser.tabs.Tab | undefined): Promise<OverlayCheckResponse> {
+async function handleOverlayCheck(
+  tab: Browser.tabs.Tab | undefined,
+  hasDirectMedia: boolean,
+): Promise<OverlayCheckResponse> {
   if (tab?.id === undefined || !tab.url) return { available: false };
-  return { available: await resolveOverlayAvailability(tab.id, tab.url) };
+  return { available: await resolveOverlayAvailability(tab.id, tab.url, hasDirectMedia === true) };
 }
 
-async function handleQuickDownload(tab: Browser.tabs.Tab | undefined): Promise<QuickDownloadResponse> {
+async function handleQuickDownload(
+  tab: Browser.tabs.Tab | undefined,
+  clicked: unknown,
+): Promise<QuickDownloadResponse> {
   if (tab?.id === undefined || !tab.url) return { ok: false, error: 'Onglet introuvable.' };
-  return runQuickDownload(tab.id, tab.url);
+  return runQuickDownload(tab.id, { url: tab.url, title: tab.title }, clicked);
 }
 
 /** Signale au content script qu'une source vient d'apparaître (flux sniffé après chargement). */

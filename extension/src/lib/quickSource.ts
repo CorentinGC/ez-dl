@@ -6,7 +6,7 @@
  * que la popup et l'overlay envoient exactement le même job sur la même page.
  */
 
-import { collapseVariantPlaylists, groupQualityVariants } from './detection';
+import { classifyUrl, collapseVariantPlaylists, groupQualityVariants } from './detection';
 import { buildDefaultFilename, sanitizeFilename } from './filename';
 import type { ExtensionSettings, FavoriteFolder, MediaCandidate, MediaKind, ProbeFormat, ProbeResponse } from './types';
 
@@ -22,6 +22,20 @@ export interface QuickJobSource {
   title: string;
 }
 
+/**
+ * Vidéo précise désignée par l'utilisateur en cliquant son bouton en overlay. Ces données
+ * viennent de la page : elles ne servent qu'à choisir un média et un nom de fichier, et passent
+ * toutes par `sanitizeClickedVideo` avant usage.
+ */
+export interface ClickedVideo {
+  /** `currentSrc` de l'élément, `null` pour un lecteur MSE (`blob:`) ou une source inutilisable. */
+  mediaUrl: string | null;
+  /** Titre le plus probable trouvé autour de la vidéo dans la page. */
+  title: string | null;
+  /** Vrai si c'est la seule vidéo exploitable de la page : le probe couvre alors bien celle-ci. */
+  isOnlyVideo: boolean;
+}
+
 export interface QuickSourceInput {
   /** Résultat de `/api/probe` sur l'URL de l'onglet, ou `null` si absent/sans extracteur. */
   probe: ProbeResponse | null;
@@ -29,6 +43,31 @@ export interface QuickSourceInput {
   candidates: MediaCandidate[];
   pageUrl: string;
   pageTitle: string;
+  /** Vidéo cliquée dans la page ; absente quand la demande vient de la popup. */
+  clicked?: ClickedVideo | null;
+}
+
+const MAX_MEDIA_URL_LENGTH = 2048;
+
+/**
+ * Normalise ce que le content script rapporte de la vidéo cliquée. Une page hostile contrôle ces
+ * champs : seules des URL `http(s)` de longueur raisonnable sont retenues (le serveur revalide le
+ * schéma de son côté), et le titre est ramené à une ligne bornée avant d'atteindre le nom de
+ * fichier — qui passe encore par `sanitizeFilename`.
+ */
+export function sanitizeClickedVideo(raw: unknown): ClickedVideo | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { mediaUrl, title, isOnlyVideo } = raw as Record<string, unknown>;
+  return {
+    mediaUrl: isUsableMediaUrl(mediaUrl) ? mediaUrl : null,
+    title: typeof title === 'string' && title.trim().length > 0 ? title.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
+    isOnlyVideo: isOnlyVideo === true,
+  };
+}
+
+function isUsableMediaUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > MAX_MEDIA_URL_LENGTH) return false;
+  return value.startsWith('http://') || value.startsWith('https://');
 }
 
 /**
@@ -36,24 +75,46 @@ export interface QuickSourceInput {
  * Le probe prime : il donne un titre, un nom de fichier et toutes les qualités. À défaut, le
  * meilleur flux sniffé (manifeste avant fichier progressif, meilleure résolution du groupe).
  */
-export function pickQuickSource({ probe, candidates, pageUrl, pageTitle }: QuickSourceInput): QuickJobSource | null {
+export function pickQuickSource({ probe, candidates, pageUrl, pageTitle, clicked }: QuickSourceInput): QuickJobSource | null {
+  const clickedTitle = clicked?.title ?? null;
+
+  // Plusieurs vidéos sur la page : le probe ne décrit que la principale, alors que l'utilisateur
+  // a désigné un élément précis. Son média direct prime donc sur tout le reste.
+  if (clicked?.mediaUrl && !clicked.isOnlyVideo) return fromClickedMedia(clicked.mediaUrl, clickedTitle, pageTitle);
+
   if (probe && probe.formats.length > 0) {
     const formatId = probe.best_format_id ?? sortFormatsBestFirst(probe.formats)[0]?.format_id ?? null;
+    const title = probe.title ?? clickedTitle ?? pageTitle;
     return {
       url: pageUrl,
       formatId,
-      filename: defaultFilenameForProbe(probe, pageTitle, formatId),
-      title: probe.title ?? pageTitle,
+      filename: defaultFilenameForProbe(probe, title, formatId),
+      title,
     };
   }
 
+  // Vidéo unique mais sans extracteur yt-dlp : son `currentSrc` reste plus fiable qu'un flux
+  // sniffé choisi au jugé (une page peut charger d'autres médias en arrière-plan).
+  if (clicked?.mediaUrl) return fromClickedMedia(clicked.mediaUrl, clickedTitle, pageTitle);
+
   const best = pickBestCandidate(candidates);
   if (!best) return null;
+  const title = clickedTitle ?? pageTitle;
   return {
     url: best.url,
     formatId: null,
-    filename: defaultFilenameForMedia(best.kind, pageTitle, pageTitle),
-    title: pageTitle,
+    filename: defaultFilenameForMedia(best.kind, title, pageTitle),
+    title,
+  };
+}
+
+function fromClickedMedia(mediaUrl: string, clickedTitle: string | null, pageTitle: string): QuickJobSource {
+  const title = clickedTitle ?? pageTitle;
+  return {
+    url: mediaUrl,
+    formatId: null,
+    filename: defaultFilenameForMedia(classifyUrl(mediaUrl) ?? 'other-video', title, pageTitle),
+    title,
   };
 }
 

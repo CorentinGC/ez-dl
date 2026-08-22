@@ -97,9 +97,10 @@ learning mode.
 
 ## Page overlay download button (visited page)
 
-The content script anchors a download button to the top-right corner of the page's video, removing
-the round trip through the popup. It only shows up **when a source is confirmed** — never a dead
-button.
+The content script anchors a download button to the top-right corner of **every** eligible video on
+the page, removing the round trip through the popup. It only shows up **when a source is confirmed**
+— never a dead button. On a page listing several players, each button downloads *its own* video (12
+buttons at most, the largest visible ones).
 
 **Display conditions**, all required:
 
@@ -108,30 +109,50 @@ button.
 2. a server is configured (URL + password);
 3. the page holds a `<video>` of at least **200 × 150 px** visible in the viewport (thresholds in
    `src/lib/overlayGeometry.ts`, which rule out ads, autoplay GIFs and tracking pixels);
-4. the background confirms a source: sniffed streams exist for the tab, **or** the `/api/probe` call
-   on the tab URL returns at least one format.
+4. the background confirms a source: a video exposes a direct media URL (`http(s)` `currentSrc`),
+   **or** sniffed streams exist for the tab, **or** the `/api/probe` call on the tab URL returns at
+   least one format.
 
 **Bounded server cost**: the probe is only a last resort (no sniffed stream), once per tab URL — the
 result is cached in `TabState.quickProbe`, which navigation clears along with the rest of the tab
 state. Iframes of the same page share the in-flight request. When a stream is sniffed later, the
 background pushes `OVERLAY_AVAILABLE` to the tab, so the button appears without another round trip.
 
-**On click**, the job is sent with the active profile's defaults: best quality (`best_format_id`,
-otherwise the highest-resolution format), default favourite folder, default preset, cookies if the
-option is on. The selection is done by `src/lib/quickSource.ts`, a pure module shared with the
-popup's source card: both paths propose the exact same filename and quality for a given page.
+**On click**, the job is sent with the active profile's defaults: default favourite folder, default
+preset, cookies if the option is on. The media itself follows a priority order (`pickQuickSource`,
+`src/lib/quickSource.ts`):
+
+1. **several videos on the page** → the clicked video's media URL: the probe only describes the main
+   video and would download the wrong one;
+2. **single video** → the yt-dlp probe (best quality, video and audio tracks remuxed);
+3. no extractor → the clicked video's media URL;
+4. otherwise → the best sniffed stream (manifest before progressive file).
+
+The **title** comes from the DOM around the clicked video, not from the page title:
+`aria-label`/`title`/`data-title` attributes, then `h1`–`h4`, `[role="heading"]` and `figcaption`,
+walking up at most 8 ancestors. The closest plausible candidate wins (`chooseVideoTitle`,
+`src/lib/videoTitle.ts`), player control labels ("Play", "Pause", "0:42"…) are discarded, and the
+fallback is `og:title` then the tab title — read from `sender.tab.title`, always fresh, where the
+stored page snapshot may predate an SPA navigation.
+
+Shared defaults (format choice, filename, folder) are the same ones the popup's source card uses:
+both paths propose exactly the same thing for a given video.
 
 **Separation of concerns** — the content script only touches the DOM and messaging:
 
 | Context | Role |
 |---|---|
-| `src/content/videoOverlay.ts` | `<video>` tracking, positioning, Shadow DOM, toast |
+| `src/content/videoOverlay.ts` | `<video>` tracking, one badge per video, positioning, toast |
+| `src/content/videoTitleDom.ts` | collecting candidate texts around a video |
+| `src/lib/videoTitle.ts` | pure title choice (proximity, reliability, UI-noise filtering) |
 | `entrypoints/background.ts` | `OVERLAY_CHECK` / `QUICK_DOWNLOAD` routing, `OVERLAY_AVAILABLE` push |
 | `src/lib/quickDownload.ts` | probe + cache, cookies, `POST /api/jobs` |
 
 Neither the server URL, nor the password, nor the cookies ever cross the page boundary: the content
-script only receives an availability boolean, then a job id or an error message. The background
-ignores any data sent by the page and trusts `sender.tab` only. The UI lives in a Shadow DOM (styles
+script only receives an availability boolean, then a job id or an error message. The tab and its URL
+always come from `sender.tab`, never from the message. The only data accepted from the page — the
+clicked video's media URL and title — goes through `sanitizeClickedVideo`: `http(s)` scheme
+required, bounded lengths, title flattened to a single line before reaching `sanitizeFilename`. The UI lives in a Shadow DOM (styles
 isolated both ways) and steps aside while the picker mode is active.
 
 ## Extending detection
