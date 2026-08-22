@@ -30,6 +30,31 @@ When reporting, please include as much of the following as you can:
 - The potential impact as you understand it
 - Any suggested fix or mitigation, if you have one
 
+## Container privilege model
+
+The published Docker image starts its entrypoint as `root` and immediately drops to the
+application user with `gosu` before executing anything else. Nothing in the application — the
+FastAPI server, and the `yt-dlp` and `ffmpeg` subprocesses it spawns — ever runs as `root`; you can
+confirm this with `grep Uid /proc/1/status` inside a running container.
+
+The root window exists for one reason: `PUID`/`PGID` are runtime settings, so the entrypoint has to
+make `EZDL_DATA_DIR`, `EZDL_TEMP_DIR` and the `EZDL_DOWNLOAD_ROOTS` directories writable by the
+uid/gid that owns your volumes. Only `root` can do that, and without it the published image would
+only work on hosts whose user happens to be uid 1000. `PUID=0` is refused outright.
+
+Two consequences worth knowing:
+
+- The `HEALTHCHECK` and a `docker exec` without `--user` run as `root`. The healthcheck only
+  performs a local HTTP request and writes nothing.
+- Setting `user:` in Compose (or `docker run --user`) makes the entrypoint detect that it is not
+  `root`, skip every ownership change, and exec the command directly. That gives you a container
+  that is non-root end to end, at the cost of having to provide already-writable volumes yourself.
+
+Ownership changes are deliberately narrow: `EZDL_DATA_DIR`, `EZDL_TEMP_DIR` and the Deno cache are
+adjusted recursively because ez-dl owns them entirely, while each download root is only adjusted at
+its top level, and only when it is not already writable — a media library shared with other
+applications is never rewritten.
+
 ## What's out of scope
 
 - **DRM circumvention.** Reports asking for, or demonstrating, bypasses of Widevine, PlayReady,

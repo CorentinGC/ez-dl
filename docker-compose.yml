@@ -13,7 +13,7 @@ services:
   server:
     # Image publiée par la CI à chaque push sur main (jobs verts uniquement). `docker compose
     # up -d` la tire telle quelle ; `docker compose up -d --build` la reconstruit localement
-    # (dev, ou PUID/PGID ≠ 1000 : l'image publiée est buildée avec les valeurs par défaut).
+    # (dev, ou variante GPU).
     image: ${EZDL_IMAGE:-ghcr.io/corentingc/ez-dl:latest}
     build:
       context: ./server
@@ -24,8 +24,9 @@ services:
         # serveur démarre normalement mais n'a rien à distribuer.
         extension: ./extension
       args:
-        # UID/GID de l'utilisateur du conteneur — alignez-les sur le propriétaire de vos
-        # volumes médias (ex: `id -u`/`id -g` de l'utilisateur qui possède le NAS monté).
+        # Valeurs de départ de l'utilisateur créé DANS l'image. Ce ne sont plus elles qui
+        # décident de l'identité d'exécution : l'entrypoint applique les variables
+        # d'environnement PUID/PGID ci-dessous au démarrage du conteneur.
         PUID: ${PUID:-1000}
         PGID: ${PGID:-1000}
     container_name: ez-dl
@@ -45,6 +46,13 @@ services:
         required: false
 
     environment:
+      # UID/GID d'exécution du serveur — alignez-les sur le PROPRIÉTAIRE de vos volumes
+      # médias (`id -u` / `id -g` sur l'hôte, ou le propriétaire du partage sur un NAS).
+      # Appliqués au démarrage du conteneur par l'entrypoint : l'image publiée fonctionne
+      # telle quelle sur un hôte dont l'utilisateur n'est pas 1000, sans reconstruction.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+
       # Recommandé : définir EZDL_PASSWORD dans un fichier .env. S'il est absent/vide, le
       # serveur génère un mot de passe fort à CHAQUE démarrage et l'affiche dans les logs
       # (`docker compose logs server`) — il n'existe pas de mode sans authentification.

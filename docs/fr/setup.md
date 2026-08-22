@@ -60,6 +60,32 @@ racine pour le gabarit avec valeurs génériques).
 
 Exemple générique de `EZDL_DOWNLOAD_ROOTS` pour un NAS : `Films=/mnt/media/movies,Séries=/mnt/media/tv`.
 
+### Identité d'exécution : `PUID` / `PGID`
+
+Ces deux variables ne portent pas le préfixe `EZDL_` : elles sont lues par l'entrypoint du
+conteneur, pas par l'application.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `PUID` | `1000` | uid sous lequel le serveur s'exécute dans le conteneur |
+| `PGID` | `1000` | gid correspondant |
+
+Renseignez-les avec l'uid/gid **propriétaire de vos volumes** (`id -u` et `id -g` sur l'hôte, ou le
+propriétaire du partage sur un NAS). Elles sont appliquées **au démarrage du conteneur** : l'image
+publiée fonctionne telle quelle sur un hôte dont l'utilisateur n'est pas `1000`, sans avoir à la
+reconstruire.
+
+L'entrypoint démarre `root` le temps de rendre `EZDL_DATA_DIR`, `EZDL_TEMP_DIR` et les racines de
+`EZDL_DOWNLOAD_ROOTS` inscriptibles par ce couple, puis passe à l'utilisateur applicatif via `gosu`.
+Aucun code applicatif ne s'exécute en `root` — vérifiable avec
+`docker exec ez-dl grep Uid /proc/1/status`. `PUID=0` est refusé.
+
+Une racine de téléchargement **déjà inscriptible** n'est jamais touchée, et seul son premier niveau
+est ajusté le cas échéant : une bibliothèque média partagée avec d'autres applications n'est pas
+réécrite. Pour un conteneur non-root de bout en bout, fixez `user:` dans le compose — l'entrypoint
+détecte alors qu'il n'est pas `root`, ne tente aucun changement de propriétaire et exécute
+directement la commande ; c'est à vous de fournir des volumes déjà inscriptibles.
+
 ## Docker Compose
 
 ```bash
@@ -277,8 +303,9 @@ docker compose up -d
 
 Watchtower est confiné au stack (`WATCHTOWER_LABEL_ENABLE` + scope `ez-dl`) : les autres
 conteneurs de l'hôte ne sont jamais touchés. Réservé aux déploiements qui utilisent l'**image
-publiée** (`docker compose up -d`, sans `--build`) — elle est construite avec `PUID`/`PGID`
-1000 ; un hôte à UID différent ou en variante GPU reste sur la voie ci-dessous.
+publiée** (`docker compose up -d`, sans `--build`). Un UID hôte différent de 1000 ne demande
+plus de build local — il suffit de renseigner `PUID`/`PGID` ; seule la variante GPU reste sur la
+voie ci-dessous.
 
 ### Voie alternative — build local + cron hôte
 

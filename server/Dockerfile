@@ -141,16 +141,22 @@ COPY . .
 # =============================================================================
 FROM python:3.13-slim-bookworm AS final-base
 
-# UID/GID paramétrables pour aligner l'utilisateur du conteneur avec le propriétaire
-# des volumes montés (NAS, partage réseau, etc.) et éviter les problèmes de droits.
+# UID/GID de l'utilisateur applicatif CRÉÉ dans l'image. Ce ne sont que des valeurs de
+# départ : docker-entrypoint.sh réaligne l'utilisateur sur les variables d'environnement
+# PUID/PGID au démarrage du conteneur. Une image publiée (donc buildée avec les valeurs
+# par défaut) fonctionne ainsi sur un hôte dont l'utilisateur n'est pas 1000, sans rebuild.
 ARG PUID=1000
 ARG PGID=1000
 
 # ca-certificates : TLS pour les appels sortants (yt-dlp, self-update, extracteurs).
 # curl : utilisé par le HEALTHCHECK et pour télécharger le binaire yt-dlp ci-dessous.
+# gosu : abandon des privilèges dans docker-entrypoint.sh. Contrairement à `su` ou `sudo`,
+# gosu remplace le process (exec) sans en créer un second : uvicorn reste le PID 1 du
+# conteneur et reçoit directement SIGTERM.
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp STANDALONE officiel (pas la version pip) : requis pour que l'auto-update
@@ -216,6 +222,12 @@ COPY --chown=${PUID}:${PGID} . .
 # par root uniquement, hors de portée du process non-root.
 COPY --from=extension-zip --chown=root:root /out/ /app/extension-dist/
 
+# Entrypoint hors de /app et root:root : il s'exécute avec les privilèges root avant le
+# passage à l'utilisateur applicatif, il ne doit donc jamais être modifiable par ce
+# dernier. --chmod plutôt qu'un chmod dans un RUN : le bit exécutable ne dépend alors pas
+# des permissions du fichier sur la machine qui construit l'image.
+COPY --chmod=755 --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
 # HOME/DENO_DIR explicites : Docker ne dérive pas toujours HOME de /etc/passwd quand USER
 # est positionné, et un Deno sans cache inscriptible fait échouer l'extraction YouTube.
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -254,7 +266,16 @@ COPY --from=ffmpeg-nvenc /out/ffmpeg /out/ffprobe /usr/local/bin/
 # =============================================================================
 FROM final-${FFMPEG_VARIANT} AS final
 
-USER ezdl
+# Pas de `USER ezdl` ici, volontairement : docker-entrypoint.sh a besoin des privilèges
+# root pour rendre /config, EZDL_TEMP_DIR et les racines de téléchargement inscriptibles
+# par ${PUID}:${PGID} — ce que seul root peut faire, et qui est indispensable dès que
+# l'hôte n'utilise pas l'uid 1000 (NAS, Raspberry Pi). L'entrypoint repasse ensuite à
+# l'utilisateur applicatif via gosu : aucun code applicatif ne s'exécute en root.
+# Conséquences à connaître : le HEALTHCHECK ci-dessous et un `docker exec` sans --user
+# s'exécutent, eux, en root. Le premier ne fait qu'une requête HTTP locale sans écriture.
+# Pour retrouver un conteneur non-root de bout en bout, fixer `user:` dans compose : dans
+# ce cas l'entrypoint détecte qu'il n'est pas root, ne tente aucun chown et exec directement
+# — c'est alors à l'hôte de fournir des volumes déjà inscriptibles.
 
 EXPOSE 8000
 
@@ -262,6 +283,8 @@ EXPOSE 8000
 # initialise la base SQLite, ce qui peut prendre du temps sur un NAS/CPU lent.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${EZDL_PORT:-8000}/api/health" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Forme shell + exec : substitue les variables d'env puis remplace le process shell
 # (exec) pour que uvicorn reçoive directement SIGTERM et s'arrête proprement.

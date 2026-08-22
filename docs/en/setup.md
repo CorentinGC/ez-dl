@@ -60,6 +60,31 @@ root for the template with generic values).
 
 Generic example of `EZDL_DOWNLOAD_ROOTS` for a NAS: `Movies=/mnt/media/movies,Series=/mnt/media/tv`.
 
+### Runtime identity: `PUID` / `PGID`
+
+These two variables carry no `EZDL_` prefix: they are read by the container entrypoint, not by the
+application.
+
+| Variable | Default | Role |
+|---|---|---|
+| `PUID` | `1000` | uid the server runs as inside the container |
+| `PGID` | `1000` | matching gid |
+
+Set them to the uid/gid that **owns your volumes** (`id -u` and `id -g` on the host, or the owner of
+the share on a NAS). They are applied **when the container starts**: the published image works as-is
+on a host whose user is not `1000`, with no rebuild.
+
+The entrypoint starts as `root` just long enough to make `EZDL_DATA_DIR`, `EZDL_TEMP_DIR` and the
+`EZDL_DOWNLOAD_ROOTS` roots writable by that pair, then drops to the application user with `gosu`.
+No application code ever runs as `root` — check it with
+`docker exec ez-dl grep Uid /proc/1/status`. `PUID=0` is refused.
+
+A download root that is **already writable** is never touched, and only its top level is adjusted
+when it is not: a media library shared with other applications is never rewritten. For a container
+that is non-root end to end, set `user:` in the compose file — the entrypoint then detects it is not
+`root`, attempts no ownership change and execs the command directly; providing already-writable
+volumes is then up to you.
+
 ## Docker Compose
 
 ```bash
@@ -274,8 +299,8 @@ docker compose up -d
 
 Watchtower is confined to the stack (`WATCHTOWER_LABEL_ENABLE` + `ez-dl` scope): the host's other
 containers are never touched. Only for deployments running the **published image**
-(`docker compose up -d`, no `--build`) — it is built with `PUID`/`PGID` 1000; a host with a
-different UID or the GPU variant stays on the path below.
+(`docker compose up -d`, no `--build`). A host UID other than 1000 no longer requires a local
+build — just set `PUID`/`PGID`; only the GPU variant stays on the path below.
 
 ### Alternative path — local build + host cron
 
