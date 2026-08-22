@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import capabilities, extension, folders, health, jobs, probe, rules
+from app.api import brand, capabilities, extension, folders, health, jobs, probe, rules
 from app.config import APP_VERSION, Settings, conflicting_roots, get_settings
 from app.core import ffmpeg, ytdlp
 from app.core.paths import PathSecurityError, unavailable_roots
@@ -167,6 +167,8 @@ def create_app() -> FastAPI:
     # Sans préfixe `/api` : `/extension` est une URL ouverte dans un navigateur, pas un
     # point d'entrée d'API (routes publiques, cf. ADR 0004).
     app.include_router(extension.router)
+    # Idem, et à la racine par obligation : un navigateur cherche le favicon sur /favicon.ico.
+    app.include_router(brand.router)
 
     @app.exception_handler(PathSecurityError)
     async def _path_security_handler(request: Request, exc: PathSecurityError) -> JSONResponse:
