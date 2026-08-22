@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, conflicting_roots, ensure_password, parse_download_roots
+from app.config import (
+    APP_VERSION,
+    Settings,
+    conflicting_roots,
+    ensure_password,
+    parse_download_roots,
+    read_app_version,
+)
 
 
 def test_blank_password_is_normalized_to_empty() -> None:
@@ -127,3 +135,32 @@ def test_strips_the_trailing_slash_of_the_public_url() -> None:
     settings = Settings(password="x", public_url="https://ez-dl.example.com/", _env_file=None)
 
     assert settings.public_url == "https://ez-dl.example.com"
+
+
+def test_app_version_matches_pyproject() -> None:
+    """Source de vérité unique : un numéro recopié à la main dériverait en silence."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with pyproject.open("rb") as stream:
+        assert APP_VERSION == tomllib.load(stream)["project"]["version"]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",
+        "[project]\n",
+        "[project]\nversion = 1\n",
+        '[project]\nversion = ""\n',
+        "pas du toml [",
+    ],
+)
+def test_unreadable_pyproject_falls_back_instead_of_crashing(tmp_path: Path, content: str) -> None:
+    """Un serveur qui affiche une version fausse vaut mieux qu'un serveur qui ne démarre pas."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(content, encoding="utf-8")
+
+    assert read_app_version(pyproject) == "0.0.0"
+
+
+def test_missing_pyproject_falls_back(tmp_path: Path) -> None:
+    assert read_app_version(tmp_path / "absent.toml") == "0.0.0"

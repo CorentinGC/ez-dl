@@ -4,13 +4,35 @@ from __future__ import annotations
 
 import re
 import secrets
+import tomllib
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import BaseModel, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-APP_VERSION = "0.1.0"
+# Version applicative — source de vérité unique : `[project].version` de pyproject.toml.
+# Recopier le numéro ici le laisserait dériver en silence, et c'est le seul fichier de
+# version présent dans le contexte de build Docker (`context: ./server`).
+_PYPROJECT_PATH = Path(__file__).resolve().parent.parent / "pyproject.toml"
+_FALLBACK_VERSION = "0.0.0"
+
+
+def read_app_version(pyproject_path: Path = _PYPROJECT_PATH) -> str:
+    """Lit la version du pyproject.toml ; renvoie `0.0.0` si illisible plutôt que de crasher.
+
+    Un serveur qui démarre en affichant une version fausse reste préférable à un serveur
+    qui refuse de démarrer parce qu'un fichier de packaging manque.
+    """
+    try:
+        with pyproject_path.open("rb") as stream:
+            version = tomllib.load(stream)["project"]["version"]
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
+        return _FALLBACK_VERSION
+    return version if isinstance(version, str) and version else _FALLBACK_VERSION
+
+
+APP_VERSION = read_app_version()
 
 # 24 octets aléatoires -> 32 caractères URL-safe : suffisant pour un Bearer token.
 _GENERATED_PASSWORD_BYTES = 24
