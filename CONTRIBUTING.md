@@ -131,10 +131,46 @@ If you're contributing a built-in rule: add it to the extension's default rule s
 `url_pattern` as a simple glob/regex (no site-specific business logic bolted on), and include a
 short note on how you verified it (which page(s), what stream URL pattern it matches).
 
+## Versioning and releases
+
+A single source of truth for the version number: `[project].version` in
+`server/pyproject.toml`. `APP_VERSION` is derived from it (read with `tomllib`), and
+`extension/package.json` must match it.
+
+The format is **strictly numeric** (`X.Y.Z`, 1 to 4 numbers): Chrome rejects anything else in an
+extension manifest, and a prerelease such as `0.2.0-rc1` makes `/extension/version` return
+`version: null` with no visible error.
+
+Releasing a version:
+
+```bash
+scripts/check-version.sh          # pyproject / APP_VERSION / package.json / uv.lock agree
+scripts/release.sh 0.2.0          # rewrites versions, promotes the CHANGELOG, commits + tags
+scripts/release.sh 0.2.0 --dry-run  # show what it would do, write nothing
+```
+
+`release.sh` **never** pushes: it prints the push command for you to run. Pushing the **tag** is
+what triggers `.github/workflows/release.yml` (GHCR image `X.Y.Z`, `X.Y` and `latest` for amd64 +
+arm64, then a GitHub Release).
+
+Any user-visible change goes under `## [Unreleased]` in `CHANGELOG.md` **and**
+`CHANGELOG.fr.md`, in the same commit — `release.sh` refuses to publish a version whose section
+is empty.
+
+Published image channels:
+
+| Tag | Contents |
+|---|---|
+| `latest`, `X.Y.Z`, `X.Y` | tagged releases only |
+| `edge`, `main-<sha>` | every green commit on `main` |
+
+A published tag is never moved: a fix gets the next patch version.
+
 ## PR checklist
 
 - [ ] Code follows the style rules above (ruff clean / `npm run compile` clean)
 - [ ] Tests added/updated and passing (`uv run pytest`, and Vitest where applicable)
 - [ ] `README`/`README.fr.md` and/or `docs/` updated if behavior or configuration changed
+- [ ] User-visible changes added under `## [Unreleased]` in `CHANGELOG.md` **and** `CHANGELOG.fr.md`
 - [ ] No personal information, no DRM-bypass code
 - [ ] Commits follow Conventional Commits and are signed off (`-s`)

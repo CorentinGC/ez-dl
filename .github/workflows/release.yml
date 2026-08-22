@@ -1,0 +1,121 @@
+name: Release
+
+# Déclenché par le PUSH D'UN TAG semver, jamais par un commit : c'est le tag qui décide
+# qu'une version est publiée. `scripts/release.sh X.Y.Z` prépare tout localement et affiche
+# la commande de push — il ne pousse rien lui-même.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+# Pas d'annulation : couper une release en cours laisserait un index multi-arch à moitié
+# assemblé sur GHCR, ou une Release sans ses assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Cohérence des versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Installer uv
+        # Tag exact : astral-sh ne publie pas de tag majeur flottant (pas de v10)
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "server/uv.lock"
+
+      - name: Installer les dépendances (uv sync)
+        working-directory: server
+        run: uv sync
+
+      - name: Vérifier que le tag, le code et le CHANGELOG concordent
+        # Un tag qui ne correspond pas à server/pyproject.toml publierait une image dont
+        # /api/health annonce une autre version que celle de l'image.
+        run: scripts/check-version.sh "${GITHUB_REF_NAME}"
+
+      - name: Tests serveur
+        working-directory: server
+        run: uv run pytest -q
+
+      - name: Tests extension
+        working-directory: extension
+        run: |
+          npm ci
+          npm run compile
+          npm run test --if-present
+
+  image:
+    name: Image
+    needs: [guard]
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      should_push: true
+      # `latest=auto` (défaut de metadata-action) pose `latest` sur tout tag semver non
+      # préversion — c'est ce que suit un déploiement watchtower en profil `autoupdate`.
+      tags: |
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+
+  release:
+    name: GitHub Release
+    needs: [image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Extraire les notes de version
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          {
+            scripts/changelog-section.sh "$version"
+            printf '\n---\n\n'
+            # shellcheck disable=SC2016  # backticks et %s sont du markdown, pas du shell
+            printf 'Image : `docker pull ghcr.io/%s:%s` (linux/amd64 + linux/arm64)\n' \
+              "${GITHUB_REPOSITORY,,}" "$version"
+            printf '\nNotes en français : [CHANGELOG.fr.md](%s/blob/%s/CHANGELOG.fr.md)\n' \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+          } > /tmp/release-notes.md
+          cat /tmp/release-notes.md
+
+      - name: Préparer les assets d'installation
+        id: assets
+        # Les fichiers d'installation en une ligne n'existent pas encore à la v0.1.0 : la
+        # release se publie sans eux plutôt que d'échouer. Les sommes accompagnent chaque
+        # asset — install.sh vérifie celle du compose qu'il télécharge.
+        run: |
+          mkdir -p /tmp/assets
+          for file in deploy/install.sh deploy/compose/docker-compose.yml; do
+            [ -f "$file" ] || continue
+            cp "$file" /tmp/assets/
+            ( cd /tmp/assets && sha256sum "$(basename "$file")" > "$(basename "$file").sha256" )
+          done
+          ls -A /tmp/assets
+
+      - name: Publier la release
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: /tmp/release-notes.md
+          files: /tmp/assets/*
+          fail_on_unmatched_files: false
+          # 0.x : la release reste marquée comme non stabilisée tant que le projet n'est
+          # pas en 1.0, sans être une préversion (elle porte `latest` sur GHCR).
+          make_latest: true

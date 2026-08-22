@@ -146,11 +146,48 @@ l'extension, gardez `url_pattern` comme un glob/regex simple (pas de logique mé
 site greffée dessus), et incluez une courte note sur comment vous l'avez vérifiée (quelle(s)
 page(s), quel motif d'URL de flux elle capture).
 
+## Versions et publication
+
+Une seule source de vérité pour le numéro de version : `[project].version` de
+`server/pyproject.toml`. `APP_VERSION` en est dérivé (lecture `tomllib`), et
+`extension/package.json` doit être aligné dessus.
+
+Format **strictement numérique** (`X.Y.Z`, 1 à 4 nombres) : Chrome refuse toute autre forme
+dans le manifeste d'une extension, et une préversion comme `0.2.0-rc1` fait renvoyer
+`version: null` par `/extension/version`, sans erreur visible.
+
+Publier une version :
+
+```bash
+scripts/check-version.sh          # cohérence pyproject / APP_VERSION / package.json / uv.lock
+scripts/release.sh 0.2.0          # réécrit les versions, promeut le CHANGELOG, commit + tag
+scripts/release.sh 0.2.0 --dry-run  # pour voir ce qui serait fait, sans rien écrire
+```
+
+`release.sh` ne pousse **jamais** : il affiche la commande de push à lancer à la main. C'est le
+push du **tag** qui déclenche `.github/workflows/release.yml` (image GHCR `X.Y.Z`, `X.Y` et
+`latest` en amd64 + arm64, puis GitHub Release).
+
+Toute modification visible par un utilisateur s'ajoute sous `## [Unreleased]` dans
+`CHANGELOG.md` **et** `CHANGELOG.fr.md`, dans le même commit — `release.sh` refuse de publier
+une version dont la section est vide.
+
+Canaux d'image publiés :
+
+| Tag | Contenu |
+|---|---|
+| `latest`, `X.Y.Z`, `X.Y` | versions taguées uniquement |
+| `edge`, `main-<sha>` | chaque commit vert sur `main` |
+
+Un tag publié ne se déplace jamais : une correction donne le patch suivant.
+
 ## Checklist de PR
 
 - [ ] Le code respecte les règles de style ci-dessus (ruff propre / `npm run compile` propre)
 - [ ] Tests ajoutés/mis à jour et passants (`uv run pytest`, et Vitest le cas échéant)
 - [ ] `README`/`README.fr.md` et/ou `docs/` mis à jour si le comportement ou la configuration ont
       changé
+- [ ] Changements visibles par l'utilisateur ajoutés sous `## [Unreleased]` dans `CHANGELOG.md`
+      **et** `CHANGELOG.fr.md`
 - [ ] Aucune information personnelle, aucun code de contournement de DRM
 - [ ] Les commits suivent Conventional Commits et sont signés (`-s`)
