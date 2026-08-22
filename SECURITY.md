@@ -8,9 +8,11 @@ server — are treated as high priority.
 
 ## Supported versions
 
-This project does not yet have a formal release/support matrix. Until it does, the only supported
-version is the latest commit on the `main` branch. Please make sure you can reproduce an issue
-against `main` before reporting it.
+Only the **latest published release** is supported (`ghcr.io/corentingc/ez-dl:latest`, see the
+[changelog](CHANGELOG.md)); fixes land there and in the next release, never as a backport to an
+older version. The `edge` channel tracks `main` and is not a supported deployment target.
+
+Please reproduce an issue against the latest release, or against `main`, before reporting it.
 
 ## Reporting a vulnerability
 
@@ -63,8 +65,8 @@ applications is never rewritten.
   not implement or accept this functionality under any circumstances.
 - Vulnerabilities that require an attacker to already know your `EZDL_PASSWORD` and have direct
   network access to a server you've chosen to expose without following the
-  [Security recommendations](README.md#security) (e.g. no reverse proxy/TLS on a
-  publicly-reachable host) are lower priority, but still worth reporting if there's a way to
+  [remote access recommendations](docs/en/setup.md#remote-access-reverse-proxy) (e.g. no reverse
+  proxy or TLS on a publicly-reachable host) are lower priority, but still worth reporting if there's a way to
   reduce the blast radius.
 
 ## Response

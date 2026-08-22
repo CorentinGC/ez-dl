@@ -36,6 +36,9 @@ sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui
 - **Infra** : Dockerfile multi-stage non-root, `docker-compose.yml` (+ override GPU), CI GitHub
   Actions, Makefile. `docker compose config` validé.
 - **Cohérence** : routes appelées par l'extension comparées à l'OpenAPI réel du serveur — alignées.
+- **Docs** : README×2 réduits à « projet + installation rapide + installation manuelle + index de
+  doc ». Tout le reste a un fichier dédié : `ROADMAP.md`/`.fr.md`, `docs/{fr,en}/faq.md`, table des
+  variables et reverse proxy et permissions de l'extension dans `docs/{fr,en}/setup.md`.
 
 ## Prochaines étapes
 

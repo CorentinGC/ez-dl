@@ -105,8 +105,15 @@ le stack et attend que `/api/health` réponde. Il ne pose aucune question et n'u
 | `EZDL_PORT` | `8000` | Port publié sur l'hôte |
 | `EZDL_DOWNLOADS_DIR` | `$EZDL_DIR/downloads` | Destination des téléchargements |
 | `EZDL_PASSWORD` | généré | Mot de passe imposé plutôt que généré |
-| `EZDL_TAG` | `latest` | Tag d'image (`0.1.0`, `edge`…) |
+| `EZDL_TAG` | `latest` | Tag d'image (`0.1.1`, `edge`…) |
 | `EZDL_AUTOUPDATE` | `true` | Service watchtower de mise à jour automatique |
+
+Les variables se placent **après** le pipe, sinon elles configurent `curl` et non le script :
+
+```bash
+curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh \
+  | EZDL_PORT=9000 EZDL_DOWNLOADS_DIR=/mnt/media/downloads sh
+```
 
 `sh install.sh --dry-run` montre ce qui serait fait sans rien écrire. Relancé sur une
 installation existante, le script passe en **mode mise à jour** : il ne touche pas au `.env`,
@@ -172,6 +179,23 @@ pour le contexte) :
 
 Le serveur publie lui-même l'extension empaquetée : installer ez-dl sur une nouvelle machine ne
 demande ni de cloner le dépôt, ni d'installer Node.
+
+### Permissions demandées par l'extension
+
+Ce que Chrome affiche à l'installation, et à quoi chaque permission sert :
+
+| Permission | Pourquoi |
+|---|---|
+| `webRequest` | Renifler les requêtes sortantes (`.m3u8`, `.mpd`, `.mp4`…) pour attraper les flux que yt-dlp seul manquerait. |
+| `storage` | Mémoriser localement l'URL du serveur, le mot de passe, les dossiers favoris et le preset par défaut (`chrome.storage.local`). |
+| `tabs` | Savoir quel onglet est actif, rattacher les requêtes reniflées au bon onglet, mettre à jour le badge par onglet. |
+| `cookies` | Lire, uniquement si vous l'activez, les cookies du site courant pour les passer à yt-dlp (contenu derrière une session connectée). |
+| `activeTab` | Laisser la popup agir sur l'onglet ouvert. |
+| `scripting` | Injecter le picker « aider à détecter » dans la page, à la demande. |
+| `host_permissions: <all_urls>` | La détection doit fonctionner sur n'importe quel site : ez-dl ne code aucune liste de sites en dur. |
+
+Les cookies ne sont jamais envoyés sans action explicite de votre part, ne sont jamais journalisés,
+et le fichier temporaire qui les porte côté serveur est en `0600` puis supprimé à la fin du job.
 
 ### Voie recommandée — archive publiée par le serveur
 
@@ -337,6 +361,30 @@ Deux cibles Makefile encadrent l'opération : `make zip-extension` (produire le 
 4. Le mot de passe est stocké côté extension dans `chrome.storage.local` et envoyé en
    `Authorization: Bearer <mot de passe>` à chaque requête.
 
+## Accès distant (reverse proxy)
+
+Ne pas exposer le serveur directement sur Internet. Pour un accès distant, mettre devant lui un
+reverse proxy qui termine le TLS. Exemples minimaux :
+
+```caddyfile
+dl.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name dl.example.com;
+    ssl_certificate     /etc/ssl/certs/dl.example.com.pem;
+    ssl_certificate_key /etc/ssl/private/dl.example.com.key;
+    location / { proxy_pass http://127.0.0.1:8000; }
+}
+```
+
+Derrière un proxy, renseigner `EZDL_PUBLIC_URL` : `/extension/update.xml` doit publier une URL de
+téléchargement absolue, et l'adresse vue par uvicorn n'est pas celle du client.
+
 ## Mise à jour automatique du serveur
 
 Deux voies, exclusives l'une de l'autre
@@ -399,7 +447,7 @@ les erreurs.
 
 ```bash
 curl http://localhost:8000/api/health
-# {"status":"ok","version":"0.1.0","ytdlp_version":"2026.xx.xx","ffmpeg_available":true}
+# {"status":"ok","version":"0.1.1","ytdlp_version":"2026.xx.xx","ffmpeg_available":true}
 ```
 
 Un `status: "ok"` avec `ffmpeg_available: true` confirme que le serveur, yt-dlp et ffmpeg sont

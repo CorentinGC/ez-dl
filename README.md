@@ -21,19 +21,11 @@ whatever you point it at). No third-party cloud, no upload of your links anywher
 
 ---
 
-## Table of contents
-
 - [What it is](#what-it-is)
 - [Legal & scope](#legal--scope)
-- [Architecture](#architecture)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [Security](#security)
-- [Development](#development)
-- [FAQ](#faq)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [Licensing](#licensing)
+- [Quick install](#quick-install)
+- [Manual install](#manual-install)
+- [Documentation](#documentation)
 
 ## What it is
 
@@ -53,6 +45,10 @@ whatever you point it at). No third-party cloud, no upload of your links anywher
   page; ez-dl correlates that with recent network traffic and can remember the pattern for that
   site next time.
 
+The server is a FastAPI application driving `yt-dlp` and `ffmpeg` through a job queue, writing
+only into the folders you allow it to write into. Full picture:
+[`docs/en/architecture.md`](docs/en/architecture.md).
+
 ## Legal & scope
 
 ez-dl is a tool for downloading video content **you already have the right to download** — your
@@ -68,255 +64,129 @@ save, and so on.
 - ez-dl is infrastructure for downloading and organizing files — it has no opinion on what you
   download, but it will not help you break protection measures to get it.
 
-## Architecture
+## Quick install
 
-```text
-┌────────────────────────┐      HTTP(S) + Bearer token      ┌─────────────────────────────┐
-│  Browser + Extension    │ ───────────────────────────────▶│            Server            │
-│  (MV3, detect + sniff)  │◀─────────────────────────────── │  FastAPI + yt-dlp + ffmpeg   │
-│                          │        SSE job progress          │  queue · convert · rename    │
-└────────────────────────┘                                   └───────────────┬─────────────┘
-                                                                               │ writes into
-                                                                               ▼
-                                                                 ┌───────────────────────────┐
-                                                                 │   NAS / disk folders        │
-                                                                 │  (EZDL_DOWNLOAD_ROOTS)       │
-                                                                 └───────────────────────────┘
-```
+You need Docker with the Compose plugin, and Chrome (or Chromium). Nothing else — no clone, no
+Python, no Node.js.
 
-## Quick start
-
-### 1. Run the server with Docker Compose
-
-Create a `.env` file next to your `docker-compose.yml` (see [`.env.example`](.env.example) for the
-full list of variables), then:
-
-```yaml
-# docker-compose.yml
-services:
-  ez-dl-server:
-    build: ./server
-    container_name: ez-dl-server
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      EZDL_PASSWORD: ${EZDL_PASSWORD}
-      EZDL_DOWNLOAD_ROOTS: "Movies=/data/movies,Downloads=/data/downloads"
-    volumes:
-      - ./config:/config
-      - /mnt/media/movies:/data/movies
-      - /mnt/media/downloads:/data/downloads
-    # Uncomment to enable NVIDIA GPU-accelerated encoding (NVENC presets):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-```
+### 1. Server — one command
 
 ```bash
+curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh | sh
+```
+
+The script downloads the standalone compose file from the latest release, **verifies its SHA-256**,
+generates a strong password into a `0600` `.env`, starts the stack and waits for `/api/health` to
+answer. It asks no questions and never uses `sudo`. It prints the URL and the password once at the
+end — keep them.
+
+Defaults: `~/ez-dl` as the install folder, port `8000`, downloads in `~/ez-dl/downloads`, automatic
+updates on. Everything is overridable through environment variables, and `--dry-run` shows what
+would happen without writing anything:
+
+```bash
+curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh \
+  | EZDL_PORT=9000 EZDL_DOWNLOADS_DIR=/mnt/media/downloads sh
+```
+
+The variables go **after** the pipe: set before `curl`, they would configure `curl`, not the
+script.
+
+Piping a script from the network into a shell deserves a read first: `curl -fsSL <url> | less`.
+It is a frozen release asset, not a file from `main`. Variables, update mode and the manual
+equivalent: [`docs/en/setup.md`](docs/en/setup.md#one-command-installation-easy-path).
+
+### 2. Extension in Chrome
+
+The server publishes the packaged extension itself.
+
+1. Open `http://<server>:8000/extension` (e.g. `http://nas.local:8000/extension`) — that page is
+   public — and download the `.zip`.
+2. Unpack it into a folder **that will stay in place**: Chrome reads it again on every start.
+3. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked** and pick that
+   folder.
+
+Chrome allows no one-click install from outside the Chrome Web Store (publication is on the
+[roadmap](ROADMAP.md)). To skip Developer mode and get automatic updates, the server also
+publishes a signed `.crx` and its update manifest for a **system-policy** install — per-OS
+instructions in
+[`docs/en/setup.md`](docs/en/setup.md#path-without-developer-mode--system-policy-installation).
+
+### 3. Connect the two
+
+Open the extension **Options** page, set the **server URL** (default `http://localhost:8000`) and
+the **password** printed by the installer, then click **Test connection**. Open any page with a
+video and click the ez-dl icon.
+
+## Manual install
+
+Same result as the one-liner, step by step — for anyone who would rather not pipe a script into a
+shell.
+
+```bash
+mkdir -p ~/ez-dl && cd ~/ez-dl
+curl -fsSLO https://github.com/CorentinGC/ez-dl/releases/latest/download/docker-compose.yml
+curl -fsSLO https://github.com/CorentinGC/ez-dl/releases/latest/download/docker-compose.yml.sha256
+sha256sum -c docker-compose.yml.sha256      # macOS: shasum -a 256 -c
+
+mkdir -p downloads
+umask 077 && cat > .env <<EOF
+EZDL_PASSWORD=$(openssl rand -base64 24)
+EZDL_PORT=8000
+EZDL_DOWNLOADS_DIR=$PWD/downloads
+PUID=$(id -u)
+PGID=$(id -g)
+COMPOSE_PROFILES=autoupdate
+EOF
+
 docker compose up -d
 ```
 
-**NVIDIA NVENC:** GPU passthrough alone isn't enough — the default server image ships the
-Debian-packaged ffmpeg, which doesn't include NVENC (Debian repos exclude the required non-free
-dependencies). Use the bundled [`docker-compose.gpu.yml`](docker-compose.gpu.yml) override, which
-also rebuilds the image with a static NVENC-enabled ffmpeg binary (amd64 only):
+`PUID`/`PGID` are the identity the server runs as: set them to the owner of your media folders and
+downloaded files land with the right owner, no rebuild involved.
+
+To add destinations, mount them and list them in `EZDL_DOWNLOAD_ROOTS` — only those roots (and
+their subfolders) are writable by the server:
+
+```yaml
+    environment:
+      EZDL_DOWNLOAD_ROOTS: "Movies=/data/movies,Downloads=/data/downloads"
+    volumes:
+      - /mnt/media/movies:/data/movies
+      - /mnt/media/downloads:/data/downloads
+```
+
+Then install the extension as in [step 2 above](#2-extension-in-chrome).
+
+**Building from the repository** — for development, or for the NVENC image variant (GPU
+passthrough alone is not enough: Debian's ffmpeg ships without NVENC):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+git clone https://github.com/CorentinGC/ez-dl.git && cd ez-dl
+cp .env.example .env      # set EZDL_PASSWORD
+docker compose up -d --build
 ```
 
-See [`docs/en/modules/conversion.md`](docs/en/modules/conversion.md#nvenc-support-in-the-docker-image)
-for details.
+## Documentation
 
-### 2. Install the extension
+| | |
+|---|---|
+| [Setup](docs/en/setup.md) | Install, environment variables, `PUID`/`PGID`, reverse proxy, automatic updates |
+| [FAQ](docs/en/faq.md) | Site not detected, wrong file owner, `latest` vs `edge`, NVENC |
+| [Architecture](docs/en/architecture.md) | Components, API contract, data model, job lifecycle |
+| [Modules](docs/en/modules/) | Detection, conversion, learning mode, branding |
+| [Decisions (ADR)](docs/en/decisions/) | Why this stack, this license, this auth, these release channels |
+| [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md) | What is planned · what shipped |
+| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md) | How to help, how to report a vulnerability |
 
-The server publishes the packaged extension itself — no clone, no Node.js needed on the machine
-you install it from.
+French documentation: [`docs/fr/`](docs/fr/) — the canonical version, `docs/en/` mirrors it.
 
-1. Open `http://<server>:8000/extension` (e.g. `http://nas.local:8000/extension`) and download the
-   `.zip`. That page is public, like the download routes it links to.
-2. Unpack it into a folder **that will stay in place** — Chrome reads it again on every start.
-3. Open `chrome://extensions` and enable **Developer mode**.
-4. Click **Load unpacked** and pick the unpacked folder.
+## License
 
-Chrome allows no one-click install from outside the Chrome Web Store, and refuses any signed
-package that does not come from the Store — dropping a `.crx` onto `chrome://extensions` fails
-with "Package is invalid: CRX_REQUIRED_PROOF_MISSING", Developer mode or not. The `.crx` served by
-`/extension/download` is meant for a **system-policy** installation, the only path Chrome accepts
-outside the Store.
-
-For a fleet — or just to skip Developer mode and get automatic updates — force-install the `.crx`
-through system policy: the server publishes the matching update manifest on
-`/extension/update.xml`. Per-OS instructions in
-[`docs/en/setup.md`](docs/en/setup.md#path-without-developer-mode--system-policy-installation).
-
-To publish a new build after changing the extension, bump `version` in `extension/package.json`
-and rerun `docker compose up -d --build` (or `make publish-extension`), then replace the unpacked
-folder's contents and reload the extension. The `.crx` is signed at runtime with a key stored in
-`EZDL_DATA_DIR/extension-signing-key.pem` — keep that directory on a volume, since Chrome derives
-the extension ID from it for the policy path and a lost key means a new ID instead of an update.
-
-**Developer alternative** — build it locally and load it unpacked:
-
-```bash
-cd extension
-npm install
-npm run build
-```
-
-Then in Chrome: open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**,
-and select `extension/.output/chrome-mv3`.
-
-### 3. Configure
-
-Open the extension's **Options** page and set:
-
-- **Server URL** — defaults to `http://localhost:8000`; change it only for a remote server
-  (e.g. `http://nas.local:8000`)
-- **Password** — the value you set for `EZDL_PASSWORD`
-
-Use **Test connection** to confirm the extension can reach `/api/health`. You're ready — open any
-page with a video and click the ez-dl icon.
-
-## Configuration
-
-All server settings are environment variables prefixed `EZDL_`. See [`.env.example`](.env.example)
-for a ready-to-copy file.
-
-| Variable                            | Default                  | Role                                                                                              |
-| ------------------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------- |
-| `EZDL_PASSWORD`                      | *(recommended)* | API access password. If missing or empty, the server generates a strong password (32 URL-safe characters) each startup, displays it in the console with a 5-second pause, then starts. Set it in `.env` for a stable password. |
-| `EZDL_HOST`                          | `0.0.0.0`                 | uvicorn bind address                                                                                |
-| `EZDL_PORT`                          | `8000`                    | HTTP port                                                                                           |
-| `EZDL_DOWNLOAD_ROOTS`                | `Downloads=/data/downloads` | Allowed destination roots, format `Label=/path` separated by `,`. Only these paths (and their subfolders) are writable. |
-| `EZDL_DATA_DIR`                      | `/config`                 | SQLite database + app state                                                                        |
-| `EZDL_TEMP_DIR`                      | `/tmp/ez-dl`               | Scratch space for partial files before the final move                                              |
-| `EZDL_EXTENSION_DIST_DIR`            | `/app/extension-dist`     | Packaged extension artifacts served by `/extension`. Built into the image; if absent, the install page explains it and the download routes return `404`. |
-| `EZDL_MAX_CONCURRENT_JOBS`           | `2`                       | Queue worker count                                                                                   |
-| `EZDL_YTDLP_UPDATE_INTERVAL_HOURS`   | `24`                      | Period of the yt-dlp self-update task (`0` disables it)                                             |
-| `EZDL_YTDLP_BINARY`                  | `yt-dlp`                  | Path to the yt-dlp binary                                                                            |
-| `EZDL_FFMPEG_BINARY`                 | `ffmpeg`                  | Path to the ffmpeg binary                                                                            |
-| `EZDL_CORS_ORIGINS`                  | `chrome-extension://*`    | Allowed CORS origins                                                                                 |
-| `EZDL_LOG_LEVEL`                     | `info`                    | Log verbosity                                                                                        |
-
-**`EZDL_DOWNLOAD_ROOTS` format:** a comma-separated list of `Label=/absolute/path` pairs. Each
-label becomes a folder root the extension can browse and download into; any path outside these
-roots (including via `..` traversal) is rejected. Example:
-
-```
-EZDL_DOWNLOAD_ROOTS=Movies=/mnt/media/movies,Shows=/mnt/media/shows,Downloads=/mnt/media/downloads
-```
-
-## Security
-
-- **Authentication is always required.** If `EZDL_PASSWORD` is not set, the server generates a strong password (32 characters) each startup, displays it in an isolated console banner with a 5-second pause, then starts normally — retrieve this password from the startup logs. There is no "no auth" mode. For a stable password, set `EZDL_PASSWORD` in `.env`. The extension sends it as `Authorization: Bearer <EZDL_PASSWORD>` on every request except `/api/health`.
-- **Don't expose the server directly to the internet.** If you need remote access, put a
-  reverse proxy with TLS in front of it. Minimal examples:
-
-  Caddy:
-
-  ```caddyfile
-  dl.example.com {
-      reverse_proxy 127.0.0.1:8000
-  }
-  ```
-
-  nginx:
-
-  ```nginx
-  server {
-      listen 443 ssl;
-      server_name dl.example.com;
-      ssl_certificate     /etc/ssl/certs/dl.example.com.pem;
-      ssl_certificate_key /etc/ssl/private/dl.example.com.key;
-      location / { proxy_pass http://127.0.0.1:8000; }
-  }
-  ```
-
-- **Destination paths are always resolved and validated** against `EZDL_DOWNLOAD_ROOTS` server-side;
-  filenames are sanitized; cookies you opt to send are written to a `0600` temp file and deleted
-  after the job completes.
-
-### Extension permissions
-
-| Permission                | Why it's needed                                                                              |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `webRequest`                | Sniff outgoing requests (`.m3u8`, `.mpd`, `.mp4`, …) to catch video streams yt-dlp alone would miss. |
-| `storage`                   | Save the server URL, password, favorite folders and default preset locally in `chrome.storage.local`. |
-| `tabs`                      | Know which tab is active, correlate sniffed requests with the right tab, update the per-tab badge. |
-| `cookies`                   | Optionally read cookies for the current site to pass to yt-dlp for content behind a login — only when you enable it. |
-| `activeTab`                 | Let the popup act on the tab you currently have open.                                          |
-| `scripting`                 | Inject the "help detect" picker into the page on demand, for learning mode.                     |
-| `host_permissions: <all_urls>` | Detection has to work on any site you visit — ez-dl doesn't hardcode a site list.            |
-
-## Development
-
-**Prerequisites:** [uv](https://docs.astral.sh/uv/), Node.js + npm, `ffmpeg`/`ffprobe`, `yt-dlp`
-(all reachable on `PATH`, or pointed to via `EZDL_FFMPEG_BINARY` / `EZDL_YTDLP_BINARY`).
-
-```bash
-# Server, with auto-reload (from server/)
-uv run uvicorn app.main:app --reload
-
-# Extension, dev build with hot reload (from extension/)
-npm run dev
-
-# Server tests (from server/)
-uv run pytest
-
-# Server lint (from server/)
-uv run ruff check .
-
-# Extension production build (from extension/)
-npm run build
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, code style, and how to add a
-conversion preset or a site detection rule.
-
-## FAQ
-
-**Site X isn't detected?**
-Open the popup, click "Help detect", and click the video on the page. ez-dl correlates your click
-with recent network traffic and can save a reusable rule for that site.
-
-**Does it work with x.com / Twitter?**
-Yes, via yt-dlp — enable cookie forwarding in the options if the content requires a logged-in
-session.
-
-**What about DRM-protected services (Netflix, etc.)?**
-No, and it never will — see [Legal & scope](#legal--scope). That's explicitly out of scope.
-
-**Why does it need a password?**
-The API drives downloads and writes files to your disk. Without authentication, anyone who can
-reach the server on your network could trigger downloads or fill up your storage.
-
-## Roadmap
-
-- [ ] Firefox support
-- [ ] Pause / resume and queue reordering
-- [ ] Built-in HTTPS helper for the reverse-proxy setup
-- [ ] Mobile-friendly companion UI
-- [ ] Apple VideoToolbox hardware encoding
-
-## Contributing
-
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, code style,
-and how to add a preset or a site rule. Please also read the
-[Code of Conduct](CODE_OF_CONDUCT.md) and, for vulnerabilities, [SECURITY.md](SECURITY.md).
-
-## Licensing
-
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial
-use is free. **Any commercial use requires a separate, paid commercial license.** To obtain one,
-please open a GitHub Issue in this repository, or contact the maintainer at
+[PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial use is free. **Any commercial use
+requires a separate, paid commercial license** — open a GitHub Issue or contact the maintainer at
 `<contact@example.com>`.
 
-Note: PolyForm Noncommercial is a source-available license, not an OSI-approved open source
-license — you can read, use for noncommercial purposes, modify, and redistribute the code, but
-commercial use is restricted unless separately licensed.
+PolyForm Noncommercial is a source-available license, not an OSI-approved open source license: you
+can read, use noncommercially, modify and redistribute the code, but commercial use is restricted
+unless separately licensed.

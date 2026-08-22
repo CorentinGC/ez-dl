@@ -104,8 +104,15 @@ configured through environment variables:
 | `EZDL_PORT` | `8000` | Port published on the host |
 | `EZDL_DOWNLOADS_DIR` | `$EZDL_DIR/downloads` | Download destination |
 | `EZDL_PASSWORD` | generated | Force a password instead of generating one |
-| `EZDL_TAG` | `latest` | Image tag (`0.1.0`, `edge`…) |
+| `EZDL_TAG` | `latest` | Image tag (`0.1.1`, `edge`…) |
 | `EZDL_AUTOUPDATE` | `true` | Watchtower auto-update service |
+
+Variables go **after** the pipe, otherwise they configure `curl` and not the script:
+
+```bash
+curl -fsSL https://github.com/CorentinGC/ez-dl/releases/latest/download/install.sh \
+  | EZDL_PORT=9000 EZDL_DOWNLOADS_DIR=/mnt/media/downloads sh
+```
 
 `sh install.sh --dry-run` shows what it would do without writing anything. Run again on an
 existing installation, the script switches to **update mode**: it leaves the `.env` alone, so the
@@ -169,6 +176,23 @@ for context):
 
 The server publishes the packaged extension itself: installing ez-dl on a new machine requires
 neither cloning the repository nor installing Node.
+
+### Permissions the extension requests
+
+What Chrome shows at install time, and what each permission is for:
+
+| Permission | Why |
+|---|---|
+| `webRequest` | Sniff outgoing requests (`.m3u8`, `.mpd`, `.mp4`, …) to catch streams yt-dlp alone would miss. |
+| `storage` | Keep the server URL, password, favorite folders and default preset locally (`chrome.storage.local`). |
+| `tabs` | Know which tab is active, attach sniffed requests to the right tab, update the per-tab badge. |
+| `cookies` | Read, only if you enable it, the current site's cookies to pass to yt-dlp (content behind a login). |
+| `activeTab` | Let the popup act on the tab you have open. |
+| `scripting` | Inject the "help detect" picker into the page, on demand. |
+| `host_permissions: <all_urls>` | Detection has to work on any site: ez-dl hardcodes no site list. |
+
+Cookies are never sent without an explicit action from you, are never logged, and the temp file
+carrying them server-side is `0600` and deleted when the job ends.
 
 ### Recommended path — archive published by the server
 
@@ -332,6 +356,30 @@ Two Makefile targets frame the operation: `make zip-extension` (produce the zip 
 4. The password is stored on the extension side in `chrome.storage.local` and sent as
    `Authorization: Bearer <password>` with every request.
 
+## Remote access (reverse proxy)
+
+Don't expose the server directly to the internet. For remote access, put a TLS-terminating reverse
+proxy in front of it. Minimal examples:
+
+```caddyfile
+dl.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name dl.example.com;
+    ssl_certificate     /etc/ssl/certs/dl.example.com.pem;
+    ssl_certificate_key /etc/ssl/private/dl.example.com.key;
+    location / { proxy_pass http://127.0.0.1:8000; }
+}
+```
+
+Behind a proxy, set `EZDL_PUBLIC_URL`: `/extension/update.xml` must publish an absolute download
+URL, and the address uvicorn sees is not the client's.
+
 ## Automatic server updates
 
 Two paths, mutually exclusive
@@ -392,7 +440,7 @@ The script is silent when there is nothing to do: the log only contains updates 
 
 ```bash
 curl http://localhost:8000/api/health
-# {"status":"ok","version":"0.1.0","ytdlp_version":"2026.xx.xx","ffmpeg_available":true}
+# {"status":"ok","version":"0.1.1","ytdlp_version":"2026.xx.xx","ffmpeg_available":true}
 ```
 
 A `status: "ok"` with `ffmpeg_available: true` confirms that the server, yt-dlp, and ffmpeg are

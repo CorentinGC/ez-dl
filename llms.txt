@@ -7,8 +7,11 @@
 
 - [Architecture](docs/fr/architecture.md) : vue d'ensemble, flux de données, structure des
   dossiers, contrat d'API, modèle de données, cycle de vie d'un job.
-- [Setup](docs/fr/setup.md) : prérequis, install dev, variables d'environnement, docker compose,
-  chargement de l'extension, mise à jour automatique du serveur, vérification.
+- [Setup](docs/fr/setup.md) : prérequis, install dev, variables d'environnement, `PUID`/`PGID`,
+  installation en une commande (`deploy/install.sh`), docker compose, chargement de l'extension et
+  permissions demandées, reverse proxy, mise à jour automatique du serveur, vérification.
+- [FAQ](docs/fr/faq.md) : détection d'un site, propriétaire des fichiers, canaux `latest`/`edge`,
+  NVENC, extension oubliée par Chrome.
 - [Conventions](docs/fr/conventions.md) : style de code, nommage, taille de fichiers, tests,
   commits, doc bilingue, sécurité.
 - [ADR 0001 — Stack FastAPI + WXT](docs/fr/decisions/0001-stack-fastapi-wxt.md)
@@ -33,6 +36,7 @@
 
 - [Architecture](docs/en/architecture.md)
 - [Setup](docs/en/setup.md)
+- [FAQ](docs/en/faq.md)
 - [Conventions](docs/en/conventions.md)
 - [ADR 0001 — FastAPI + WXT stack](docs/en/decisions/0001-stack-fastapi-wxt.md)
 - [ADR 0002 — PolyForm Noncommercial license](docs/en/decisions/0002-licence-polyform-noncommercial.md)
@@ -52,7 +56,11 @@
 
 ## Optional
 
-- [README.md](README.md) : présentation du projet, installation rapide, licence.
+- [README.md](README.md) : présentation du projet, installation rapide (une commande) et
+  installation manuelle, licence — et RIEN d'autre : configuration, sécurité, FAQ, feuille de
+  route et développement vivent dans leurs fichiers dédiés (miroir français : README.fr.md).
+- [ROADMAP.md](ROADMAP.md) : ce qui est prévu et ce qui est hors périmètre (miroir français :
+  [ROADMAP.fr.md](ROADMAP.fr.md)).
 - [CHANGELOG.md](CHANGELOG.md) : journal des versions publiées (miroir français :
   [CHANGELOG.fr.md](CHANGELOG.fr.md)). Canaux d'image : `latest`/`X.Y.Z`/`X.Y` pour les tags
   semver, `edge`/`main-<sha>` pour la branche `main`. Publication AUTOMATIQUE : le type des
