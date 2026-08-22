@@ -7,8 +7,10 @@ Ne pas laisser grossir au-delà de ~150 lignes : archiver les détails stables d
 
 Squelette complet et vérifié. **Poussé sur origin/main depuis le 2026-08-22** (jusqu'à `3a09d55` :
 fix @eaDir + CRX + update-check). Prod déployée sur helmut (voir « Pièges ») — redeploy en attente
-côté utilisateur. `deploy/auto-update.sh` (ez-dl-z4q) : auto-update du déploiement par cron,
-opt-in via `EZDL_AUTO_UPDATE=true` dans le `.env` du clone.
+côté utilisateur. Auto-update du déploiement : **ADR 0005** — la CI publie l'image sur
+`ghcr.io/corentingc/ez-dl` (job `publish`, push main vert), service watchtower opt-in dans le
+compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local :
+`deploy/auto-update.sh` par cron (`EZDL_AUTO_UPDATE=true`), les deux voies sont exclusives.
 
 - **Serveur** : routes `/api/{health,capabilities,probe,folders,jobs,jobs/events,rules}`, wrappers
   yt-dlp/ffmpeg, queue asyncio + SQLite, auth Bearer. `ruff` clean, **26 tests pytest** verts.

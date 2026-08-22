@@ -53,7 +53,9 @@ racine pour le gabarit avec valeurs génériques).
 | `EZDL_FFMPEG_BINARY` | `ffmpeg` | Chemin du binaire ffmpeg |
 | `EZDL_CORS_ORIGINS` | `chrome-extension://*` | Origines autorisées |
 | `EZDL_LOG_LEVEL` | `info` | Niveau de log |
-| `EZDL_AUTO_UPDATE` | `false` | Lue par `deploy/auto-update.sh` **côté hôte** (pas par le serveur) : `true` active la mise à jour automatique du déploiement — voir [Mise à jour automatique du serveur](#mise-à-jour-automatique-du-serveur) |
+| `EZDL_AUTO_UPDATE` | `false` | Lue par `deploy/auto-update.sh` **côté hôte** (voie build local) — voir [Mise à jour automatique du serveur](#mise-à-jour-automatique-du-serveur) |
+| `EZDL_AUTO_UPDATE_INTERVAL_SECONDS` | `300` | Période de vérification du registre par le service `watchtower` (profil `autoupdate`) |
+| `EZDL_IMAGE` | `ghcr.io/corentingc/ez-dl:latest` | Image exécutée par le compose — à surcharger pour épingler un sha ou utiliser un fork |
 
 Exemple générique de `EZDL_DOWNLOAD_ROOTS` pour un NAS : `Films=/mnt/media/movies,Séries=/mnt/media/tv`.
 
@@ -90,42 +92,51 @@ pour le contexte) :
 Le serveur publie lui-même l'extension empaquetée : installer ez-dl sur une nouvelle machine ne
 demande ni de cloner le dépôt, ni d'installer Node.
 
-### Voie recommandée — `.crx` publié par le serveur
+### Voie recommandée — archive publiée par le serveur
 
 1. Ouvrir `http://<serveur>:8000/extension` (ex. `http://nas.local:8000/extension`). La page est
    **publique** (aucun mot de passe requis, contrairement au reste de l'API) et affiche la version
-   de l'extension et celle du serveur. Elle affiche aussi l'**identifiant Chrome attendu** et
-   l'**empreinte SHA-256** du fichier.
-2. Télécharger le fichier `.crx` via le bouton de téléchargement.
-3. Ouvrir `chrome://extensions` et activer le **Mode développeur** (coin supérieur droit).
-4. **Glisser-déposer** le `.crx` téléchargé sur la page `chrome://extensions`.
-5. Vérifier que l'**identifiant affiché** sous le nom de l'extension correspond à celui annoncé
-   par la page à l'étape 1. Chrome ne valide un `.crx` glissé contre aucune racine de confiance :
-   cette comparaison est le seul moyen de détecter un artefact substitué en chemin.
+   de l'extension, celle du serveur, et l'**empreinte SHA-256** de l'archive.
+2. Télécharger le zip via le bouton de téléchargement.
+3. Décompresser l'archive dans un dossier **qui restera en place** : Chrome le relit à chaque
+   démarrage, un dossier supprimé désactive l'extension.
+4. Ouvrir `chrome://extensions` et activer le **Mode développeur** (coin supérieur droit).
+5. **Charger l'extension non empaquetée** → sélectionner le dossier décompressé.
 6. Ouvrir la page d'options de l'extension pour configurer l'URL du serveur et le mot de passe
    (étape suivante).
 
+Pour mettre à jour ensuite : remplacer le contenu du dossier par celui de la nouvelle archive,
+puis recharger l'extension depuis `chrome://extensions`.
+
+> **Le glisser-déposer du `.crx` ne fonctionne pas.** Chrome rejette tout `.crx` déposé sur
+> `chrome://extensions` qui n'est pas signé par le Chrome Web Store, avec « Package incorrect
+> CRX_REQUIRED_PROOF_MISSING » — le Mode développeur n'y change rien. Aucun serveur auto-hébergé
+> ne peut produire cette signature. Le `.crx` servi par `/extension/download` reste utile pour
+> une seule chose : l'installation pilotée par **politique système**, seul chemin où Chrome
+> vérifie une extension hors Web Store sans exiger de preuve d'éditeur (issue `ez-dl-upc`).
+
 > **Recommandation de sécurité.** Sur un réseau non maîtrisé (Internet, WiFi public), préférer
 > accéder au serveur via **HTTPS** (reverse proxy devant le serveur, tunnel cloudflared, etc.)
-> plutôt que HTTP. Un attaquant en position d'intercepteur peut substituer l'archive `.crx` et
-> faire installer une extension disposant de permissions étendues (`<all_urls>`, `cookies`,
-> `webRequest`). Vérifier l'identifiant affiché dans `chrome://extensions` permet de détecter
-> cette substitution.
+> plutôt que HTTP. Un attaquant en position d'intercepteur peut substituer l'archive et faire
+> installer une extension disposant de permissions étendues (`<all_urls>`, `cookies`,
+> `webRequest`). Comparer le SHA-256 du fichier téléchargé à celui affiché par la page permet
+> de détecter cette substitution — à condition que la page elle-même soit servie en HTTPS.
 
 Routes publiques exposées par le serveur :
 
 | Route | Contenu |
 |---|---|
-| `GET /extension` | Page HTML d'installation (versions, bouton de téléchargement, étapes d'installation, identifiant attendu et empreinte SHA-256, lien secondaire vers le zip) |
-| `GET /extension/download` | Archive `.crx` signée (`ez-dl-extension-<version>.crx`, media type `application/x-chrome-extension`) |
-| `GET /extension/zip` | Zip brut, pour la voie « Charger l'extension non empaquetée » |
+| `GET /extension` | Page HTML d'installation (versions, bouton de téléchargement du zip, étapes, empreinte SHA-256, bloc secondaire sur le paquet signé) |
+| `GET /extension/zip` | Zip de l'extension, artefact de la voie recommandée (« Charger l'extension non empaquetée ») |
+| `GET /extension/download` | Archive `.crx` signée (`ez-dl-extension-<version>.crx`, media type `application/x-chrome-extension`), destinée à l'installation par politique système — **non installable par glisser-déposer** |
 | `GET /extension/version` | JSON `{available, version, filename, size, extension_id, sha256}`, consommé par l'extension pour signaler qu'une nouvelle version est disponible. `extension_id` et `sha256` valent `null` si la signature a échoué |
 
-> **Limite connue.** Chrome n'autorise aucune installation « en un clic » depuis une page web en
-> dehors du Chrome Web Store : le Mode développeur reste obligatoire. L'installation et la mise à
-> jour silencieuses via politique système (`update.xml` + `ExtensionInstallSources` /
-> `ExtensionInstallForcelist`) sont prévues plus tard (issue `ez-dl-upc`) et ne sont pas encore
-> disponibles.
+> **Limite connue.** Hors Chrome Web Store, Chrome n'offre aucune installation « en un clic »
+> depuis une page web, et refuse tout paquet signé qui ne vient pas du Store : le Mode
+> développeur et le chargement non empaqueté restent obligatoires. La seule alternative est
+> l'installation par **politique système** (`update.xml` + `ExtensionInstallForcelist`), qui
+> apporte aussi la mise à jour automatique mais exige des droits d'administration sur chaque
+> poste — issue `ez-dl-upc`, pas encore disponible.
 
 Si l'image serveur a été construite **sans** le contexte `extension` (par exemple un `docker build`
 lancé à la main dans `server/`), le build réussit quand même mais la distribution est indisponible :
@@ -169,8 +180,10 @@ Deux cibles Makefile encadrent l'opération : `make zip-extension` (produire le 
 > **`./data` doit être persistant.** Le `.crx` est signé à l'exécution par le serveur avec une clé
 > RSA 2048 générée au premier besoin dans `EZDL_DATA_DIR/extension-signing-key.pem` (permissions
 > `0600`), le résultat étant mis en cache dans `EZDL_DATA_DIR/extension-cache/`. L'identifiant Chrome
-> de l'extension **dérive de cette clé** : la perdre change l'identifiant, et Chrome voit alors une
-> extension différente au lieu d'une mise à jour. Garder le volume `./data:/config` persistant et le
+> du **paquet signé** dérive de cette clé : la perdre change l'identifiant, et une installation par
+> politique système verrait alors une extension différente au lieu d'une mise à jour. (Une extension
+> chargée non empaquetée reçoit, elle, un identifiant dérivé du chemin de son dossier.) Garder le
+> volume `./data:/config` persistant et le
 > sauvegarder.
 
 ## Configuration serveur + mot de passe
@@ -186,16 +199,34 @@ Deux cibles Makefile encadrent l'opération : `make zip-extension` (produire le 
 
 ## Mise à jour automatique du serveur
 
-Sur un hôte de déploiement (clone git + `docker compose`), `deploy/auto-update.sh` maintient le
-serveur à jour sans intervention : lancé régulièrement par cron (ou un timer systemd), il fetch la
-branche suivie et, si l'origin a avancé, fait `git pull --ff-only` puis rebuild **du seul service
-`server`** (`docker compose up -d --build server` — les services à profil comme un tunnel ne sont
-pas touchés). Il vérifie ensuite que `/api/health` répond.
+Deux voies, exclusives l'une de l'autre
+(voir [ADR 0005](decisions/0005-auto-update-image-ghcr-watchtower.md)).
 
-Garde-fous : ne fait rien tant que `EZDL_AUTO_UPDATE=true` n'est pas posé dans le `.env` du clone
-(le flag se coupe sans toucher au cron), refuse un clone avec des modifications locales, jamais de
-merge ni de reset (`--ff-only` uniquement), verrou anti-chevauchement si un rebuild dure plus que
-l'intervalle.
+### Voie recommandée — intégrée au stack Docker (image GHCR + watchtower)
+
+La CI publie l'image de production sur `ghcr.io/corentingc/ez-dl:latest` à chaque push vert sur
+`main`. Le compose embarque un service **watchtower** (profil `autoupdate`) qui vérifie le
+registre (défaut : toutes les 5 min, `EZDL_AUTO_UPDATE_INTERVAL_SECONDS`) et recrée le conteneur
+`server` à l'identique quand une nouvelle image existe. Rien à installer sur l'hôte :
+
+```bash
+# Dans le .env à côté du docker-compose.yml :
+echo 'COMPOSE_PROFILES=autoupdate' >> .env      # ajouter aux profils déjà actifs le cas échéant
+docker compose up -d
+```
+
+Watchtower est confiné au stack (`WATCHTOWER_LABEL_ENABLE` + scope `ez-dl`) : les autres
+conteneurs de l'hôte ne sont jamais touchés. Réservé aux déploiements qui utilisent l'**image
+publiée** (`docker compose up -d`, sans `--build`) — elle est construite avec `PUID`/`PGID`
+1000 ; un hôte à UID différent ou en variante GPU reste sur la voie ci-dessous.
+
+### Voie alternative — build local + cron hôte
+
+Pour les hôtes qui construisent l'image localement, `deploy/auto-update.sh` (lancé par cron ou
+timer systemd) fetch la branche suivie et, si l'origin a avancé, fait `git pull --ff-only` puis
+rebuild **du seul service `server`**, avant de vérifier `/api/health`. Garde-fous : inactif sans
+`EZDL_AUTO_UPDATE=true` dans le `.env` du clone, refuse un clone avec des modifications locales,
+jamais de merge ni de reset, verrou anti-chevauchement.
 
 ```bash
 # 1. Activer le flag dans le .env du clone déployé

@@ -53,7 +53,9 @@ root for the template with generic values).
 | `EZDL_FFMPEG_BINARY` | `ffmpeg` | Path to the ffmpeg binary |
 | `EZDL_CORS_ORIGINS` | `chrome-extension://*` | Allowed origins |
 | `EZDL_LOG_LEVEL` | `info` | Log level |
-| `EZDL_AUTO_UPDATE` | `false` | Read by `deploy/auto-update.sh` **on the host** (not by the server): `true` enables automatic deployment updates — see [Automatic server updates](#automatic-server-updates) |
+| `EZDL_AUTO_UPDATE` | `false` | Read by `deploy/auto-update.sh` **on the host** (local-build path) — see [Automatic server updates](#automatic-server-updates) |
+| `EZDL_AUTO_UPDATE_INTERVAL_SECONDS` | `300` | Registry poll period for the `watchtower` service (`autoupdate` profile) |
+| `EZDL_IMAGE` | `ghcr.io/corentingc/ez-dl:latest` | Image run by the compose file — override to pin a sha or use a fork |
 
 Generic example of `EZDL_DOWNLOAD_ROOTS` for a NAS: `Movies=/mnt/media/movies,Series=/mnt/media/tv`.
 
@@ -89,43 +91,50 @@ for context):
 The server publishes the packaged extension itself: installing ez-dl on a new machine requires
 neither cloning the repository nor installing Node.
 
-### Recommended path — `.crx` published by the server
+### Recommended path — archive published by the server
 
 1. Open `http://<server>:8000/extension` (e.g. `http://nas.local:8000/extension`). The page is
    **public** (no password required, unlike the rest of the API) and displays the extension
-   version and the server version. It also displays the **expected Chrome ID** and the **SHA-256
-   fingerprint** of the file.
-2. Download the `.crx` file with the download button.
-3. Open `chrome://extensions` and enable **Developer mode** (top right corner).
-4. **Drag and drop** the downloaded `.crx` onto the `chrome://extensions` page.
-5. **Verification [recommended on untrusted networks]** — once the extension is installed, open
-   `chrome://extensions` and verify that the **ID displayed** under the extension name matches the
-   expected ID shown in step 1. Chrome allows no automatic cryptographic validation for sideloaded
-   extensions: this is the only way to detect artifact substitution in transit (attacker in
-   interceptor position on an untrusted network).
+   version, the server version, and the archive's **SHA-256 fingerprint**.
+2. Download the zip with the download button.
+3. Extract the archive into a folder that **will stay in place**: Chrome reads it again on every
+   start, and deleting the folder disables the extension.
+4. Open `chrome://extensions` and enable **Developer mode** (top right corner).
+5. **Load unpacked** → select the extracted folder.
 6. Open the extension's options page to configure the server URL and password
    (next step).
 
+To update later: replace the folder's contents with those of the new archive, then reload the
+extension from `chrome://extensions`.
+
+> **Drag-and-dropping the `.crx` does not work.** Chrome rejects any `.crx` dropped onto
+> `chrome://extensions` that is not signed by the Chrome Web Store, with "Package is invalid:
+> CRX_REQUIRED_PROOF_MISSING" — Developer mode changes nothing. No self-hosted server can produce
+> that signature. The `.crx` served by `/extension/download` remains useful for one thing only:
+> installation driven by **system policy**, the only path where Chrome verifies an extension from
+> outside the Web Store without requiring a publisher proof (issue `ez-dl-upc`).
+
 > **Security recommendation.** On an untrusted network (Internet, public WiFi), prefer accessing
 > the server via **HTTPS** (reverse proxy in front of the server, cloudflared tunnel, etc.)
-> rather than HTTP. An attacker in interceptor position can substitute the `.crx` archive and
-> cause the installation of an extension with broad permissions (`<all_urls>`, `cookies`,
-> `webRequest`). Verifying the ID shown in `chrome://extensions` makes it possible to detect
-> this substitution.
+> rather than HTTP. An attacker in interceptor position can substitute the archive and cause the
+> installation of an extension with broad permissions (`<all_urls>`, `cookies`, `webRequest`).
+> Comparing the downloaded file's SHA-256 with the one shown on the page detects that
+> substitution — provided the page itself is served over HTTPS.
 
 Public routes exposed by the server:
 
 | Route | Content |
 |---|---|
-| `GET /extension` | HTML installation page (versions, download button, install steps, expected identifier and SHA-256 fingerprint, secondary link to the zip) |
-| `GET /extension/download` | Signed `.crx` archive (`ez-dl-extension-<version>.crx`, media type `application/x-chrome-extension`) |
-| `GET /extension/zip` | Raw zip, for the "Load unpacked" path |
+| `GET /extension` | HTML installation page (versions, zip download button, steps, SHA-256 fingerprint, secondary block about the signed package) |
+| `GET /extension/zip` | Extension zip, the artifact of the recommended path ("Load unpacked") |
+| `GET /extension/download` | Signed `.crx` archive (`ez-dl-extension-<version>.crx`, media type `application/x-chrome-extension`), meant for system-policy installation — **not installable by drag and drop** |
 | `GET /extension/version` | JSON `{available, version, filename, size, extension_id, sha256}`, consumed by the extension to signal that a new version is available. `extension_id` and `sha256` are `null` when signing failed |
 
-> **Known limitation.** Chrome allows no "one-click" install from a web page outside the Chrome
-> Web Store: Developer mode remains mandatory. Silent installation and update through system
-> policy (`update.xml` + `ExtensionInstallSources` / `ExtensionInstallForcelist`) are planned for
-> later (issue `ez-dl-upc`) and are not available yet.
+> **Known limitation.** Outside the Chrome Web Store, Chrome offers no "one-click" install from a
+> web page, and refuses any signed package that does not come from the Store: Developer mode and
+> loading unpacked remain mandatory. The only alternative is installation through **system policy**
+> (`update.xml` + `ExtensionInstallForcelist`), which also brings automatic updates but requires
+> administrator rights on every machine — issue `ez-dl-upc`, not available yet.
 
 If the server image was built **without** the `extension` context (for example a `docker build` run
 by hand inside `server/`), the build still succeeds but distribution is unavailable: the page
@@ -189,15 +198,34 @@ Two Makefile targets frame the operation: `make zip-extension` (produce the zip 
 
 ## Automatic server updates
 
-On a deployment host (git clone + `docker compose`), `deploy/auto-update.sh` keeps the server
-current without manual steps: run it regularly from cron (or a systemd timer); it fetches the
-tracked branch and, when origin has moved, does `git pull --ff-only` then rebuilds **only the
-`server` service** (`docker compose up -d --build server` — profile-gated services such as a
-tunnel are left alone). It then checks that `/api/health` answers.
+Two paths, mutually exclusive
+(see [ADR 0005](decisions/0005-auto-update-image-ghcr-watchtower.md)).
 
-Safeguards: it does nothing unless `EZDL_AUTO_UPDATE=true` is set in the clone's `.env` (the flag
-turns it off without touching cron), refuses a clone with local changes, never merges or resets
-(`--ff-only` only), and holds a lock so overlapping runs abort.
+### Recommended path — integrated into the Docker stack (GHCR image + watchtower)
+
+CI publishes the production image to `ghcr.io/corentingc/ez-dl:latest` on every green push to
+`main`. The compose file ships a **watchtower** service (profile `autoupdate`) that polls the
+registry (default: every 5 min, `EZDL_AUTO_UPDATE_INTERVAL_SECONDS`) and recreates the `server`
+container identically when a new image exists. Nothing to install on the host:
+
+```bash
+# In the .env next to docker-compose.yml:
+echo 'COMPOSE_PROFILES=autoupdate' >> .env      # append to already-active profiles if any
+docker compose up -d
+```
+
+Watchtower is confined to the stack (`WATCHTOWER_LABEL_ENABLE` + `ez-dl` scope): the host's other
+containers are never touched. Only for deployments running the **published image**
+(`docker compose up -d`, no `--build`) — it is built with `PUID`/`PGID` 1000; a host with a
+different UID or the GPU variant stays on the path below.
+
+### Alternative path — local build + host cron
+
+For hosts building the image locally, `deploy/auto-update.sh` (run from cron or a systemd timer)
+fetches the tracked branch and, when origin has moved, does `git pull --ff-only` then rebuilds
+**only the `server` service**, before checking `/api/health`. Safeguards: inactive without
+`EZDL_AUTO_UPDATE=true` in the clone's `.env`, refuses a clone with local changes, never merges
+or resets, holds an anti-overlap lock.
 
 ```bash
 # 1. Enable the flag in the deployed clone's .env

@@ -11,6 +11,10 @@
 
 services:
   server:
+    # Image publiée par la CI à chaque push sur main (jobs verts uniquement). `docker compose
+    # up -d` la tire telle quelle ; `docker compose up -d --build` la reconstruit localement
+    # (dev, ou PUID/PGID ≠ 1000 : l'image publiée est buildée avec les valeurs par défaut).
+    image: ${EZDL_IMAGE:-ghcr.io/corentingc/ez-dl:latest}
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -26,6 +30,12 @@ services:
         PGID: ${PGID:-1000}
     container_name: ez-dl
     restart: unless-stopped
+
+    # Opt-in du service `watchtower` ci-dessous : seuls les conteneurs portant ces labels
+    # (et ce scope) sont mis à jour — les autres stacks de l'hôte ne sont jamais touchées.
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.scope=ez-dl
 
     # Fichier .env optionnel (non versionné) pour surcharger les variables ci-dessous
     # sans les écrire en clair dans ce fichier. `required: false` : docker compose ne
@@ -86,6 +96,31 @@ services:
       timeout: 5s
       start_period: 60s
       retries: 3
+
+  # Mise à jour automatique du serveur, intégrée au stack : watchtower tire la nouvelle
+  # image GHCR dès que la CI en publie une, puis recrée le conteneur `server` à l'identique.
+  # Opt-in : ajouter `COMPOSE_PROFILES=autoupdate` dans le .env (le service ne démarre pas
+  # sans ce profil). Ne fonctionne qu'avec l'image publiée — un serveur buildé localement
+  # serait « rétrogradé » vers l'image du registre à la première vérification.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: ez-dl-watchtower
+    profiles: ["autoupdate"]
+    restart: unless-stopped
+    volumes:
+      # Nécessaire pour recréer le conteneur — c'est un accès root à Docker : le service
+      # n'expose aucun port et ne surveille que les conteneurs du scope `ez-dl`.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_SCOPE: ez-dl
+      # Période de vérification du registre, en secondes.
+      WATCHTOWER_POLL_INTERVAL: ${EZDL_AUTO_UPDATE_INTERVAL_SECONDS:-300}
+      # Supprime l'ancienne image après mise à jour (sinon elles s'accumulent).
+      WATCHTOWER_CLEANUP: "true"
+    labels:
+      # watchtower doit porter son propre scope pour que `WATCHTOWER_SCOPE` filtre.
+      - com.centurylinklabs.watchtower.scope=ez-dl
 
 volumes:
   # Fichiers partiels des téléchargements en cours (EZDL_TEMP_DIR). Volume nommé et non
