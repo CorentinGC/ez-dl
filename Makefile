@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev-server dev-extension test lint build-extension up up-gpu down logs rebuild
+.PHONY: help install dev-server dev-extension test lint build-extension zip-extension publish-extension up up-gpu down logs rebuild
 
 help: ## Affiche cette aide
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -27,6 +27,13 @@ lint: ## Lint + vérifie le formatage du serveur (ruff)
 
 build-extension: ## Build de production de l'extension Chrome
 	cd extension && npm run build
+
+zip-extension: ## Empaquette l'extension en zip (identique à celui publié par le serveur)
+	cd extension && npm run zip
+
+publish-extension: ## Republie l'extension sur le serveur (après un bump de version)
+	docker compose build server
+	docker compose up -d server
 
 up: ## Démarre la stack Docker (serveur) en arrière-plan
 	docker compose up -d

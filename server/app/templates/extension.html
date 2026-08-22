@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ez-dl — installer l'extension</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --text: #1a1d21;
+        --muted: #5c6470;
+        --accent: #2f6feb;
+        --accent-text: #ffffff;
+        --border: #e2e5ea;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #15181c;
+          --card: #1e2228;
+          --text: #e8eaed;
+          --muted: #9aa3af;
+          --accent: #4c8bf5;
+          --accent-text: #0d1117;
+          --border: #2c313a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2.5rem 1.25rem;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      main {
+        max-width: 34rem;
+        margin: 0 auto;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 2rem;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.5rem;
+      }
+      .versions {
+        margin: 0 0 1.75rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .download {
+        display: inline-block;
+        margin-bottom: 1.5rem;
+        padding: 0.7rem 1.2rem;
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--accent-text);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .download:hover,
+      .download:focus-visible {
+        filter: brightness(1.08);
+      }
+      ol {
+        margin: 0 0 1.5rem;
+        padding-left: 1.25rem;
+      }
+      li {
+        margin-bottom: 0.5rem;
+      }
+      code {
+        padding: 0.1rem 0.35rem;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--bg);
+        font-size: 0.9em;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85rem;
+        word-break: break-all;
+        color: var(--text);
+      }
+      .note,
+      .unavailable {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .unavailable {
+        font-weight: 600;
+        color: var(--text);
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Installer l'extension ez-dl</h1>
+      <p class="versions">Extension $version · serveur $server_version</p>
+      $body
+    </main>
+  </body>
+</html>

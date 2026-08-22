@@ -1,0 +1,14 @@
+# Contexte de build de l'extension (stage `extension-zip` du Dockerfile serveur) : seules
+# les sources comptent. Les dépendances sont réinstallées par `npm ci` dans le conteneur,
+# et un build local recopié fausserait le zip publié.
+node_modules
+.output
+.wxt
+stats.html
+
+# Jamais dans le contexte : WXT/Vite inlinent les variables `WXT_*`/`VITE_*` d'un `.env`
+# dans le bundle, et ce bundle est ensuite servi publiquement sur /extension.
+.env
+.env.*
+.git
+.DS_Store

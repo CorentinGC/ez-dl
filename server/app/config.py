@@ -62,6 +62,12 @@ def _validated_root_path(path_str: str, chunk: str) -> Path:
     return path
 
 
+def _overlaps(first: Path, second: Path) -> bool:
+    """Vrai si l'un des deux chemins est l'autre ou le contient."""
+    first, second = first.resolve(), second.resolve()
+    return first == second or first in second.parents or second in first.parents
+
+
 def _origin_to_regex(pattern: str) -> str:
     """Convertit un pattern d'origine CORS (avec `*` en wildcard) en regex ancrée."""
     escaped = re.escape(pattern).replace(r"\*", ".*")
@@ -80,6 +86,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     download_roots: str = "Downloads=/data/downloads"
+    # Artefacts de l'extension déposés par le build Docker (zip + version). Absent quand
+    # l'image est construite sans le contexte `extension` : la distribution est alors
+    # simplement indisponible, le serveur démarre normalement.
+    extension_dist_dir: Path = Path("/app/extension-dist")
     data_dir: Path = Path("/config")
     temp_dir: Path = Path("/tmp/ez-dl")
     max_concurrent_jobs: int = 2
@@ -134,6 +144,31 @@ class Settings(BaseSettings):
         """Regex combinée pour `CORSMiddleware` (supporte les wildcards `*`)."""
         patterns = [_origin_to_regex(o) for o in self.cors_origin_list]
         return "|".join(patterns) if patterns else "$^"
+
+
+def conflicting_roots(settings: Settings) -> list[str]:
+    """Racines de téléchargement qui recouvrent l'état interne du serveur.
+
+    Un job écrit où l'utilisateur le demande, à l'intérieur d'une racine. Si une racine
+    contient `EZDL_DATA_DIR` (clé de signature de l'extension, base SQLite) ou
+    `EZDL_EXTENSION_DIST_DIR` (zip publié, signé tel quel avec cette clé), un téléchargement
+    devient une primitive d'écriture sur ces fichiers — et le serveur, un oracle de signature
+    capable de produire un `.crx` au même identifiant Chrome que l'extension légitime.
+
+    Retourne des messages plutôt que de lever : la validation vit dans le démarrage, pas dans
+    un validateur pydantic dont le rapport d'erreur embarquerait tous les réglages, mot de
+    passe compris.
+    """
+    protected = {
+        "EZDL_DATA_DIR": settings.data_dir,
+        "EZDL_EXTENSION_DIST_DIR": settings.extension_dist_dir,
+    }
+    return [
+        f"la racine {root.label!r} ({root.path}) recouvre {name} ({path})"
+        for root in settings.roots
+        for name, path in protected.items()
+        if _overlaps(root.path, path)
+    ]
 
 
 def ensure_password(settings: Settings) -> Settings:

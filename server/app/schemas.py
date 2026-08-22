@@ -137,6 +137,25 @@ class HealthResponse(BaseModel):
     ffmpeg_available: bool
 
 
+class ExtensionVersionResponse(BaseModel):
+    """Version de l'extension publiée par ce serveur (route publique).
+
+    `available` est faux quand l'image a été construite sans le contexte `extension` : le
+    client doit alors rester silencieux plutôt que de signaler une erreur.
+
+    `extension_id` et `sha256` sont les empreintes du `.crx` publié : elles permettent de
+    vérifier que l'extension installée vient bien de ce serveur. Absentes quand la signature
+    a échoué (données non inscriptibles) — la version reste alors annonçable.
+    """
+
+    available: bool
+    version: str | None = None
+    filename: str | None = None
+    size: int | None = None
+    extension_id: str | None = None
+    sha256: str | None = None
+
+
 class RootOut(BaseModel):
     """Une racine de téléchargement autorisée.
 

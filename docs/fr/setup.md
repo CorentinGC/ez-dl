@@ -6,8 +6,8 @@
 |---|---|---|
 | Python | ≥ 3.13 | Serveur |
 | [uv](https://docs.astral.sh/uv/) | dernière stable | Gestionnaire de paquets/venv Python |
-| Node.js | ≥ 20 (LTS) | Build de l'extension |
-| npm | livré avec Node.js | Gestionnaire de paquets extension |
+| Node.js | ≥ 20 (LTS) | Build de l'extension (voie développeur uniquement) |
+| npm | livré avec Node.js | Gestionnaire de paquets extension (voie développeur uniquement) |
 | Docker + Docker Compose | dernière stable | Déploiement du serveur |
 | `yt-dlp` | binaire **standalone** (pas la version pip) | Téléchargement vidéo — voir [MEMORY.md](../../MEMORY.md) pour la raison |
 | `ffmpeg` / `ffprobe` | dernière stable | Conversion et probe des flux |
@@ -43,8 +43,9 @@ racine pour le gabarit avec valeurs génériques).
 | `EZDL_PASSWORD` | *(recommandé)* | Mot de passe d'accès à l'API. Si absent ou vide, le serveur génère un mot de passe fort (32 caractères URL-safe) à chaque démarrage, l'affiche dans la console avec une pause de 5 secondes, puis démarre. Définiez-le dans `.env` pour un mot de passe stable. |
 | `EZDL_HOST` | `0.0.0.0` | Bind uvicorn |
 | `EZDL_PORT` | `8000` | Port HTTP |
-| `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Racines autorisées, format `Label=/chemin` séparées par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. |
-| `EZDL_DATA_DIR` | `/config` | SQLite + état persistant |
+| `EZDL_DOWNLOAD_ROOTS` | `Downloads=/data/downloads` | Racines autorisées, format `Label=/chemin` séparées par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. **Important** : aucune racine ne doit contenir (ou être contenue dans) `EZDL_DATA_DIR` ou `EZDL_EXTENSION_DIST_DIR`. Le serveur refuse de démarrer en cas de violation. |
+| `EZDL_DATA_DIR` | `/config` | SQLite + état persistant (dont la clé de signature du `.crx` — voir [Republier l'extension](#republier-lextension)) |
+| `EZDL_EXTENSION_DIST_DIR` | `/app/extension-dist` | Dossier contenant l'extension empaquetée publiée par le serveur (zip + `extension-version.txt`, dont le contenu doit être une version strictement numérique — `1`, `1.2`, `1.2.3` ou `1.2.3.4` —, toute autre valeur étant ignorée), produit lors du build de l'image Docker. Si le dossier est vide, les routes `/extension/*` restent joignables mais aucun téléchargement n'est disponible. Le dossier appartient à `root` dans l'image : le serveur, non-root, ne fait que le lire. |
 | `EZDL_TEMP_DIR` | `/tmp/ez-dl` | Fichiers partiels avant déplacement final. Doit **persister** pour que la reprise d'un téléchargement interrompu serve à quelque chose (voir ci-dessous) |
 | `EZDL_MAX_CONCURRENT_JOBS` | `2` | Nombre de workers de la queue |
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS` | `24` | Période de l'auto-update yt-dlp (`0` = désactivé) |
@@ -85,6 +86,55 @@ pour le contexte) :
 
 ## Chargement de l'extension dans Chrome
 
+Le serveur publie lui-même l'extension empaquetée : installer ez-dl sur une nouvelle machine ne
+demande ni de cloner le dépôt, ni d'installer Node.
+
+### Voie recommandée — `.crx` publié par le serveur
+
+1. Ouvrir `http://<serveur>:8000/extension` (ex. `http://nas.local:8000/extension`). La page est
+   **publique** (aucun mot de passe requis, contrairement au reste de l'API) et affiche la version
+   de l'extension et celle du serveur. Elle affiche aussi l'**identifiant Chrome attendu** et
+   l'**empreinte SHA-256** du fichier.
+2. Télécharger le fichier `.crx` via le bouton de téléchargement.
+3. Ouvrir `chrome://extensions` et activer le **Mode développeur** (coin supérieur droit).
+4. **Glisser-déposer** le `.crx` téléchargé sur la page `chrome://extensions`.
+5. Vérifier que l'**identifiant affiché** sous le nom de l'extension correspond à celui annoncé
+   par la page à l'étape 1. Chrome ne valide un `.crx` glissé contre aucune racine de confiance :
+   cette comparaison est le seul moyen de détecter un artefact substitué en chemin.
+6. Ouvrir la page d'options de l'extension pour configurer l'URL du serveur et le mot de passe
+   (étape suivante).
+
+> **Recommandation de sécurité.** Sur un réseau non maîtrisé (Internet, WiFi public), préférer
+> accéder au serveur via **HTTPS** (reverse proxy devant le serveur, tunnel cloudflared, etc.)
+> plutôt que HTTP. Un attaquant en position d'intercepteur peut substituer l'archive `.crx` et
+> faire installer une extension disposant de permissions étendues (`<all_urls>`, `cookies`,
+> `webRequest`). Vérifier l'identifiant affiché dans `chrome://extensions` permet de détecter
+> cette substitution.
+
+Routes publiques exposées par le serveur :
+
+| Route | Contenu |
+|---|---|
+| `GET /extension` | Page HTML d'installation (versions, bouton de téléchargement, étapes d'installation, identifiant attendu et empreinte SHA-256, lien secondaire vers le zip) |
+| `GET /extension/download` | Archive `.crx` signée (`ez-dl-extension-<version>.crx`, media type `application/x-chrome-extension`) |
+| `GET /extension/zip` | Zip brut, pour la voie « Charger l'extension non empaquetée » |
+| `GET /extension/version` | JSON `{available, version, filename, size, extension_id, sha256}`, consommé par l'extension pour signaler qu'une nouvelle version est disponible. `extension_id` et `sha256` valent `null` si la signature a échoué |
+
+> **Limite connue.** Chrome n'autorise aucune installation « en un clic » depuis une page web en
+> dehors du Chrome Web Store : le Mode développeur reste obligatoire. L'installation et la mise à
+> jour silencieuses via politique système (`update.xml` + `ExtensionInstallSources` /
+> `ExtensionInstallForcelist`) sont prévues plus tard (issue `ez-dl-upc`) et ne sont pas encore
+> disponibles.
+
+Si l'image serveur a été construite **sans** le contexte `extension` (par exemple un `docker build`
+lancé à la main dans `server/`), le build réussit quand même mais la distribution est indisponible :
+la page l'explique, les deux routes de téléchargement renvoient `404`, et `GET /extension/version`
+renvoie `200` avec `{"available": false, "version": null, ...}` (jamais `404`).
+
+### Voie développeur — extension non empaquetée
+
+Pour travailler sur l'extension elle-même :
+
 1. `cd extension && npm run build` (ou laisser `npm run dev` actif).
 2. Ouvrir `chrome://extensions`.
 3. Activer le **Mode développeur** (coin supérieur droit).
@@ -92,6 +142,35 @@ pour le contexte) :
    le dossier généré par `npm run dev`.
 5. Ouvrir la page d'options de l'extension pour configurer l'URL du serveur et le mot de passe
    (étape suivante).
+
+Le zip publié par le serveur (`GET /extension/zip`) sert la même voie : le décompresser puis charger
+le dossier obtenu de la même façon.
+
+## Republier l'extension
+
+Après une modification du client :
+
+1. Bumper le champ `version` dans `extension/package.json`.
+2. Reconstruire et redémarrer :
+
+```bash
+docker compose up -d --build   # ou : make publish-extension
+```
+
+L'image serveur reçoit l'extension via le **contexte nommé BuildKit `extension`**, déclaré dans
+`docker-compose.yml` (`build.additional_contexts: { extension: ./extension }`) : un stage
+`node:22-slim` exécute `npm ci` puis `npm run zip`, et le zip obtenu est copié dans
+`EZDL_EXTENSION_DIST_DIR` de l'image finale. Aucun Node ne subsiste dans l'image finale.
+
+Deux cibles Makefile encadrent l'opération : `make zip-extension` (produire le zip seul) et
+`make publish-extension` (rebuild + redémarrage du serveur).
+
+> **`./data` doit être persistant.** Le `.crx` est signé à l'exécution par le serveur avec une clé
+> RSA 2048 générée au premier besoin dans `EZDL_DATA_DIR/extension-signing-key.pem` (permissions
+> `0600`), le résultat étant mis en cache dans `EZDL_DATA_DIR/extension-cache/`. L'identifiant Chrome
+> de l'extension **dérive de cette clé** : la perdre change l'identifiant, et Chrome voit alors une
+> extension différente au lieu d'une mise à jour. Garder le volume `./data:/config` persistant et le
+> sauvegarder.
 
 ## Configuration serveur + mot de passe
 

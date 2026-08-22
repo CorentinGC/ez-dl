@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, ensure_password, parse_download_roots
+from app.config import Settings, conflicting_roots, ensure_password, parse_download_roots
 
 
 def test_blank_password_is_normalized_to_empty() -> None:
@@ -87,3 +87,29 @@ def test_accepts_absolute_download_roots(tmp_path: Path) -> None:
 
     assert [r.label for r in roots] == ["Movies", "Series"]
     assert roots[0].path == tmp_path
+
+
+@pytest.mark.parametrize("field", ["data_dir", "extension_dist_dir"])
+def test_reports_a_root_that_covers_the_server_state(tmp_path: Path, field: str) -> None:
+    """Une racine qui contient la clé de signature ou le zip publié ferait d'un simple
+    téléchargement une réécriture de l'extension distribuée, resignée par le serveur."""
+    settings = Settings(
+        password="x",
+        download_roots=f"Media={tmp_path}",
+        _env_file=None,
+        **{field: tmp_path / "interne"},
+    )
+
+    assert conflicting_roots(settings)
+
+
+def test_accepts_roots_disjoint_from_the_server_state(tmp_path: Path) -> None:
+    settings = Settings(
+        password="x",
+        download_roots=f"Media={tmp_path / 'media'}",
+        data_dir=tmp_path / "config",
+        extension_dist_dir=tmp_path / "dist",
+        _env_file=None,
+    )
+
+    assert conflicting_roots(settings) == []

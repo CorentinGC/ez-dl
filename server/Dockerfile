@@ -53,6 +53,52 @@ RUN curl -fL --retry 3 -o /tmp/ffmpeg.tar.xz \
     && rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-extract
 
 # =============================================================================
+# Stage extension — sources de l'extension Chrome, fournies en CONTEXTE NOMMÉ
+#
+# Le contexte de build du serveur est ./server : le dossier ../extension n'y est pas
+# visible. docker-compose passe donc `additional_contexts: extension: ./extension`, et
+# BuildKit substitue ce contexte à ce stage (un contexte nommé l'emporte sur un stage de
+# même nom). Sans lui — `docker build` lancé à la main dans server/ — le stage reste vide
+# et la construction du zip est simplement sautée : l'image se construit normalement, seule
+# la distribution via /extension est indisponible.
+# =============================================================================
+FROM scratch AS extension
+
+# =============================================================================
+# Stage extension-zip — build WXT de l'extension et empaquetage du zip publié
+#
+# Node n'existe QUE dans ce stage : l'image finale ne récupère que le zip et sa version.
+# La version est lue depuis extension/package.json, seule source de vérité (WXT l'injecte
+# aussi dans le manifest) ; le serveur la republie sur /extension/version.
+# =============================================================================
+FROM node:22-slim AS extension-zip
+
+WORKDIR /ext
+
+# Les sources arrivent par un BIND MOUNT et non par un `COPY --from=extension` : la clé de
+# cache d'un `COPY --from=<stage>` ignore le contenu réel du contexte nommé, si bien qu'une
+# fois ce stage en cache BuildKit le réutilisait tel quel — un bump de version dans
+# extension/package.json ne produisait plus jamais de nouveau zip, et un build sans contexte
+# suivi d'un build avec (ou l'inverse) donnait silencieusement le mauvais résultat. Le
+# contenu d'un bind mount, lui, entre bien dans la clé de cache du RUN.
+#
+# Le montage est en lecture seule : les sources sont recopiées dans /ext avant le build.
+# /out est créé dans tous les cas — le COPY de l'image finale doit réussir même sans
+# contexte `extension` (montage vide, donc pas de package.json, build sauté).
+# rm -rf : un .output ou un node_modules venu de l'hôte fausserait le zip publié.
+RUN --mount=type=bind,from=extension,target=/src \
+    --mount=type=cache,target=/root/.npm \
+    mkdir -p /out \
+    && if [ -f /src/package.json ]; then \
+        cp -R /src/. /ext/ \
+        && rm -rf .output node_modules \
+        && npm ci \
+        && npm run zip \
+        && cp .output/*-chrome.zip /out/ez-dl-extension.zip \
+        && node -p "require('./package.json').version" > /out/extension-version.txt; \
+    fi
+
+# =============================================================================
 # Stage builder — résout et installe les dépendances Python via uv
 # =============================================================================
 FROM python:3.13-slim-bookworm AS builder
@@ -158,6 +204,17 @@ WORKDIR /app
 # nécessaire car uv sync a pu créer des références relatives dans le venv).
 COPY --from=builder --chown=${PUID}:${PGID} /app/.venv /app/.venv
 COPY --chown=${PUID}:${PGID} . .
+
+# Zip de l'extension + sa version (EZDL_EXTENSION_DIST_DIR), servis par /extension. Dossier
+# vide quand l'image est construite sans contexte `extension`. À copier APRÈS le code
+# applicatif : un `COPY . .` postérieur écraserait /app et emporterait ces artefacts.
+#
+# root:root et non l'utilisateur applicatif : le serveur ne fait que LIRE ces artefacts, et
+# il signe le zip qu'il y trouve avec sa clé persistante. Un zip réécrit par le process
+# produirait un `.crx` au même identifiant Chrome que l'extension légitime — donc une mise à
+# jour silencieuse conservant les permissions déjà accordées. Le dossier reste inscriptible
+# par root uniquement, hors de portée du process non-root.
+COPY --from=extension-zip --chown=root:root /out/ /app/extension-dist/
 
 # HOME/DENO_DIR explicites : Docker ne dérive pas toujours HOME de /etc/passwd quand USER
 # est positionné, et un Deno sans cache inscriptible fait échouer l'extraction YouTube.

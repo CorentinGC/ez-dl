@@ -91,6 +91,27 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       **La route serveur est livrée par un autre lot (session parallèle) — non testée en réel
       tant qu'elle n'est pas déployée.** 160 tests Vitest. 2026-08-22.
 
+- [x] `ez-dl-s93` : distribution CRX de l'extension — 4 routes publiques `/extension`,
+      `/extension/{download,zip,version}` (`app/api/extension.py` + `app/templates/`), packing
+      CRX3 signé à l'exécution (`app/core/crx.py`, clé RSA persistée dans `EZDL_DATA_DIR`),
+      stages Docker `extension` (scratch, remplacé par `additional_contexts`) et `extension-zip`
+      (node 22, `npm run zip`), `EZDL_EXTENSION_DIST_DIR`, CI en 2 builds, ADR 0004, extension
+      bumpée en 0.1.0. Vérifié en conteneur (zip 98 Ko embarqué, `.crx` téléchargé validé par
+      l'outil tiers `crx3-utils` : identifiant dérivé et signature conformes) et en mode
+      dégradé. 152 tests pytest. 2026-08-22.
+      Durci après audit `security-reviewer` (0 critique, 0 élevée) : version publiée validée
+      en numérique pur puis échappée (`html.escape`) avant injection dans la page, zip refusé
+      s'il est un lien symbolique, clé de signature mémoïsée par process (sinon un dossier de
+      données non inscriptible faisait regénérer une clé RSA à chaque requête publique), cache
+      `.crx` indexé sur le SHA-256 de l'archive et non sur son mtime, `503` au lieu de `500`
+      quand la signature échoue, `/app/extension-dist` en `root:root` (lecture seule pour le
+      process), refus de démarrer si une racine `EZDL_DOWNLOAD_ROOTS` recouvre `EZDL_DATA_DIR`
+      ou `EZDL_EXTENSION_DIST_DIR`, `.env`/`.git` exclus du contexte de build de l'extension.
+      La page et `/extension/version` publient désormais l'identifiant Chrome attendu et le
+      SHA-256 du `.crx` (seul moyen de détecter un artefact substitué).
+      **Reste à faire : l'installation réelle par glisser-déposer dans Chrome n'a pas été
+      testée** (geste manuel, non automatisable).
+
 ## Décisions récentes (2026-08-21)
 
 - **FastAPI plutôt que Node** : yt-dlp est nativement Python, évite un wrapper CLI supplémentaire.
@@ -244,6 +265,28 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   serveur a écrit ce chemin exact. Ailleurs `folder`/`filename` n'est qu'une destination *prévue*,
   et un job échoué porte souvent le nom d'un job voisin abouti — l'effacer détruirait le fichier de
   ce dernier. L'`unlink` repasse par `resolve_destination` et n'agit que sur un `is_file()`.
+- **La clé de signature de l'extension est un état à préserver** (`EZDL_DATA_DIR/extension-signing-key.pem`,
+  `0600`) : l'identifiant Chrome de l'extension en dérive. La perdre (volume `./data` recréé) donne un
+  nouvel identifiant, donc une extension *différente* pour Chrome au lieu d'une mise à jour — les
+  utilisateurs se retrouvent avec deux extensions installées.
+- **`COPY` du zip de l'extension APRÈS le `COPY . .` de `final-base`** : un `COPY . .` postérieur
+  réécrit `/app` et emporterait `/app/extension-dist`. L'ordre des deux instructions est le contrat.
+- **BuildKit réutilise le stage `extension-zip` d'un build précédent** : enchaîner
+  `docker build --build-context extension=…` puis un `docker build` nu produit une image de « repli »
+  qui contient quand même l'extension — le test de repli ne valide alors rien. Utiliser
+  `--no-cache-filter extension-zip` (c'est ce que fait la CI) et vérifier le CONTENU de l'image,
+  pas seulement le succès du build.
+- **Le format CRX3 n'est pas un zip renommé** : `"Cr24"` + version + taille d'en-tête + en-tête
+  protobuf (`CrxFileHeader`) + zip, la signature RSA PKCS#1 v1.5 SHA-256 portant sur
+  `"CRX3 SignedData\x00"` + taille + `signed_header_data` + archive. L'identifiant est le SHA-256
+  de la clé publique DER tronqué à 16 octets, transcrit dans l'alphabet `a`-`p`. Vérifiable sans
+  Chrome avec `crx3-utils` (`crx3-info`, `crx3-verify`).
+- **`EZDL_EXTENSION_DIST_DIR` est une entrée non fiable, pas une donnée du code** : son contenu
+  vient d'un contexte de build (fork, PR, CI). Le serveur signe le zip qu'il y trouve avec sa clé
+  persistante — un zip substitué produirait un `.crx` au MÊME identifiant Chrome, donc une mise à
+  jour silencieuse conservant `<all_urls>`, `cookies` et `webRequest`. D'où : dossier `root:root`,
+  refus des liens symboliques, version validée puis échappée, et racines de téléchargement
+  interdites de recouvrir ce dossier ou `EZDL_DATA_DIR`.
 - **Assets vidéo externes piégeux pour les e2e** : `commondatastorage.googleapis.com` refuse les
   UA non-navigateur (403 pour yt-dlp/curl), `media.w3.org` 403 par intermittence quand yt-dlp
   envoie un `Referer` étranger. Servir la vidéo de test en local (`python3 -m http.server`).

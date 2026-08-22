@@ -12,8 +12,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import capabilities, folders, health, jobs, probe, rules
-from app.config import APP_VERSION, Settings, get_settings
+from app.api import capabilities, extension, folders, health, jobs, probe, rules
+from app.config import APP_VERSION, Settings, conflicting_roots, get_settings
 from app.core import ffmpeg, ytdlp
 from app.core.paths import PathSecurityError, unavailable_roots
 from app.core.queue import JobQueue
@@ -74,8 +74,24 @@ def _warn_unavailable_roots(settings: Settings) -> None:
         logger.warning("Racine de téléchargement inutilisable : %s.", issue)
 
 
+def _reject_roots_over_server_state(settings: Settings) -> None:
+    """Refuse de démarrer si une racine de téléchargement recouvre l'état du serveur.
+
+    Fatal, contrairement à une racine simplement absente : ici la configuration ferait d'un
+    téléchargement une écriture sur la clé de signature ou sur le zip publié de l'extension.
+    """
+    conflicts = conflicting_roots(settings)
+    if not conflicts:
+        return
+    raise RuntimeError(
+        "Configuration refusée — EZDL_DOWNLOAD_ROOTS ne doit contenir ni les données du "
+        f"serveur ni les artefacts de l'extension : {' ; '.join(conflicts)}."
+    )
+
+
 async def _bootstrap_state(app: FastAPI, settings: Settings) -> JobQueue:
     """Initialise DB, encodeurs ffmpeg, version yt-dlp et file de jobs ; peuple `app.state`."""
+    _reject_roots_over_server_state(settings)
     engine = get_engine(settings)
     init_db(settings)
     _warn_unavailable_roots(settings)
@@ -148,6 +164,9 @@ def create_app() -> FastAPI:
     app.include_router(folders.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(rules.router, prefix="/api")
+    # Sans préfixe `/api` : `/extension` est une URL ouverte dans un navigateur, pas un
+    # point d'entrée d'API (routes publiques, cf. ADR 0004).
+    app.include_router(extension.router)
 
     @app.exception_handler(PathSecurityError)
     async def _path_security_handler(request: Request, exc: PathSecurityError) -> JSONResponse:

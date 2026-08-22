@@ -14,6 +14,11 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
+      additional_contexts:
+        # Sources de l'extension Chrome, buildées en zip pendant la construction de l'image
+        # et publiées ensuite sur http://<serveur>:<port>/extension. Sans cette ligne, le
+        # serveur démarre normalement mais n'a rien à distribuer.
+        extension: ./extension
       args:
         # UID/GID de l'utilisateur du conteneur — alignez-les sur le propriétaire de vos
         # volumes médias (ex: `id -u`/`id -g` de l'utilisateur qui possède le NAS monté).
@@ -40,6 +45,9 @@ services:
       # Exemple cohérent avec les volumes médias montés ci-dessous — à adapter.
       EZDL_DOWNLOAD_ROOTS: ${EZDL_DOWNLOAD_ROOTS:-Movies=/data/movies,Series=/data/series}
       EZDL_DATA_DIR: ${EZDL_DATA_DIR:-/config}
+      # Artefacts de l'extension déposés par le build — à ne changer que si l'image est
+      # construite autrement.
+      EZDL_EXTENSION_DIST_DIR: ${EZDL_EXTENSION_DIST_DIR:-/app/extension-dist}
       EZDL_TEMP_DIR: ${EZDL_TEMP_DIR:-/tmp/ez-dl}
       EZDL_MAX_CONCURRENT_JOBS: ${EZDL_MAX_CONCURRENT_JOBS:-2}
       EZDL_YTDLP_UPDATE_INTERVAL_HOURS: ${EZDL_YTDLP_UPDATE_INTERVAL_HOURS:-24}

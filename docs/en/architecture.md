@@ -79,16 +79,20 @@ server/
 │   │   ├── probe.py          # GET/POST /api/probe
 │   │   ├── folders.py        # GET/POST /api/folders (secure navigation + creation)
 │   │   ├── jobs.py           # /api/jobs CRUD, pause/resume, GET /api/jobs/events (SSE)
-│   │   └── rules.py          # GET/POST/DELETE /api/rules
+│   │   ├── rules.py          # GET/POST/DELETE /api/rules
+│   │   └── extension.py      # public /extension* routes (page, .crx, zip, version)
+│   ├── templates/
+│   │   └── extension.html    # install page served by GET /extension
 │   └── core/
 │       ├── ytdlp.py           # yt-dlp subprocess wrapper (probe, download, progress)
 │       ├── ffmpeg.py          # ffmpeg subprocess wrapper, encoder detection, presets
 │       ├── queue.py           # asyncio queue, workers, pipeline, SSE pub/sub
 │       ├── workdir.py         # a job's work directory: produced file, free name, move
 │       ├── paths.py           # path resolution/validation against EZDL_DOWNLOAD_ROOTS
+│       ├── crx.py             # CRX3 packing: persisted RSA 2048 key, signature, cache
 │       └── cookies.py         # writing the temporary cookies file (0600), cleanup
-└── tests/                    # pytest: auth, config, cookies, ffmpeg, paths, queue, ytdlp,
-                              # jobs and folders routes
+└── tests/                    # pytest: auth, config, cookies, ffmpeg, paths, queue, ytdlp, crx,
+                              # jobs, folders and extension routes
 ```
 
 ### `extension/`
@@ -168,6 +172,53 @@ open folder's. No segment ever points above an allowed root — the server would
 Files are never shown: `/api/folders` returns every entry, `listSubfolders` keeps only `is_dir` —
 a download destination is always a directory.
 
+#### Extension publishing by the server
+
+The server distributes the packaged extension, so that installing ez-dl on a new machine needs
+neither a clone of the repository nor Node: open `http://<server>:8000/extension`, download the
+`.crx`, drop it onto `chrome://extensions` (developer mode enabled). The full chain:
+
+```
+Docker build (node:22-slim stage: npm ci && npm run zip)
+   └─▶ /app/extension-dist/{ez-dl-extension.zip, extension-version.txt}   (EZDL_EXTENSION_DIST_DIR)
+          └─▶ .crx signed at runtime (RSA 2048 key persisted in EZDL_DATA_DIR,
+              .crx cached in EZDL_DATA_DIR/extension-cache/)
+                 └─▶ GET /extension (page) · /extension/download (.crx) · /extension/zip · /extension/version
+```
+
+The zip is produced at build time by a dedicated Node stage, fed by the named BuildKit context
+`extension` (`build.additional_contexts` in docker-compose); **no Node remains in the final image**.
+An image built without that context stays valid: only distribution is unavailable (explanatory
+page, `404` on the downloads). The version file (`extension-version.txt`) must contain a strictly
+numeric version (`1`, `1.2`, `1.2.3`, or `1.2.3.4`); any other form is rejected, and the server
+falls back to the generic name `ez-dl-extension.crx`.
+
+Signing, on the other hand, happens at runtime: the `EZDL_DATA_DIR/extension-signing-key.pem` key
+(0600) is generated on first need and **must be persisted** (`./data:/config` volume) — Chrome's
+extension identifier derives from it, and a lost key produces a new identifier, hence a *different*
+extension in Chrome's eyes rather than an update. The signed `.crx` is cached in
+`EZDL_DATA_DIR/extension-cache/`, indexed on the zip's SHA-256 rather than on its timestamp:
+a rebuild that changes the zip is republished even when its mtime has not moved (reproducible
+build, restored backup). `GET /extension/version` returns two
+additional fields: `extension_id` (expected Chrome identifier, 32 characters a-p) and `sha256`
+(fingerprint of the served `.crx`); both are `null` on signature failure. The install page displays
+both fingerprints to let the user verify the file's integrity.
+
+The `EZDL_EXTENSION_DIST_DIR` folder (`/app/extension-dist` in the image) is owned by `root` so
+that the server, running as a non-root user, can only read it. Rationale: the server signs the zip
+it finds in that folder; rewriting that zip would produce a `.crx` carrying the same Chrome
+identifier, hence a silent update of the installed extension that keeps already-granted permissions.
+For the same reason the server refuses to start when an `EZDL_DOWNLOAD_ROOTS` root contains — or is
+contained in — `EZDL_DATA_DIR` or `EZDL_EXTENSION_DIST_DIR`.
+
+To republish after a client change: bump `version` in `extension/package.json`, then
+`docker compose up -d --build` (or `make publish-extension`).
+
+Known limitation: Chrome allows no "one-click" installation from a web page outside the Chrome Web
+Store, so developer mode remains required. Silent installation and update through system policy
+(`update.xml`, `ExtensionInstallSources`/`ExtensionInstallForcelist`) are planned for later, not
+available yet.
+
 #### Update banner
 
 On open, the popup queries `GET /extension/version` on the active profile's server (public route,
@@ -182,10 +233,14 @@ of them, so there is nothing to report to the user.
 
 ## API contract
 
-All routes are prefixed with `/api`. Authentication required (`Authorization: Bearer
-<EZDL_PASSWORD>`) on all routes except `GET /api/health`. See
+The control routes are prefixed with `/api`. Authentication required (`Authorization: Bearer
+<EZDL_PASSWORD>`) on all of them except `GET /api/health`. See
 [conventions.md](conventions.md#security) for the constant-time comparison and
 [ADR 0003](decisions/0003-auth-mot-de-passe.md) for the choice of this auth scheme.
+
+The four extension-distribution routes live **outside `/api`** and are **public**: they are opened
+from a browser's address bar, which cannot attach an `Authorization` header to a link or to a
+download.
 
 ```
 GET    /api/health          -> {status:"ok", version, ytdlp_version, ffmpeg_available}  [public]
@@ -209,6 +264,18 @@ GET    /api/jobs/events     -> SSE, event `job` with the job serialized on every
 GET    /api/rules           -> [site_rule]
 POST   /api/rules           -> body {domain, url_pattern, label?, notes?, source:"manual"|"learned"} -> site_rule
 DELETE /api/rules/{id}      -> deletes
+
+GET    /extension           -> HTML install page: extension + server versions, download button,
+                               3 steps, Chrome ID and SHA-256 fingerprint, secondary link to zip [public]
+GET    /extension/download  -> signed .crx, media type application/x-chrome-extension,
+                               named ez-dl-extension-<version>.crx; explicit 404 if the image
+                               does not contain the artifact                                  [public]
+GET    /extension/zip       -> raw zip ("Load unpacked extension" route, dev); explicit 404
+                               if the artifact is missing                                     [public]
+GET    /extension/version   -> {available, version, filename, size, extension_id, sha256}; 200
+                               {"available": false, "version": null, "extension_id": null,
+                               "sha256": null, …} if no artifact or signature failure
+                               (never 404) — consumed by the popup                            [public]
 ```
 
 ## Data model
@@ -311,9 +378,9 @@ to the request — without that re-read, yt-dlp would start over anonymously.
 - finished job (`done`, `error`, `canceled`, `paused`) → it is **removed** from the history and its
   work directory purged.
 
-The popup mirrors that switch exactly: a single button reads "Annuler" while the job is active and
-"Supprimer" afterwards (`src/lib/jobStatus.ts`, mirroring the server's status sets). It therefore
-does not drop the row on cancellation — the SSE update is what flips it to "Annulé".
+The popup mirrors that switch exactly: a single button reads "Cancel" while the job is active and
+"Delete" afterwards (`src/lib/jobStatus.ts`, mirroring the server's status sets). It therefore
+does not drop the row on cancellation — the SSE update is what flips it to "Canceled".
 
 **The downloaded file is never deleted by default**: `DELETE` only touches the history row and the
 temporary work directory. To also delete the file dropped at the destination, the client passes
@@ -328,9 +395,9 @@ an `is_file()` is removed: never a directory. An already-missing file is not an 
 idempotent. Conversely, a failed deletion (`400` unavailable root, `500` permissions) **keeps the
 job in the list**, so the only reference to the file left on disk is not lost.
 
-In the popup, "Supprimer" on a finished job opens a confirmation dialog
-(`components/ConfirmDialog.tsx`) that separates the two gestures explicitly: "Retirer de la liste"
-and "Retirer et effacer le fichier". The other statuses have no file on disk, so they are removed
+In the popup, "Delete" on a finished job opens a confirmation dialog
+(`components/ConfirmDialog.tsx`) that separates the two gestures explicitly: "Remove from list"
+and "Remove and delete the file". The other statuses have no file on disk, so they are removed
 without confirmation.
 
 Every state transition triggers an SSE publication on `/api/jobs/events`.

@@ -129,7 +129,29 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 Voir [`docs/fr/modules/conversion.md`](docs/fr/modules/conversion.md#support-nvenc-dans-limage-docker)
 pour le détail.
 
-### 2. Charger l'extension
+### 2. Installer l'extension
+
+Le serveur publie lui-même l'extension empaquetée — aucun clone, aucun Node.js nécessaire sur la
+machine depuis laquelle vous l'installez.
+
+1. Ouvrez `http://<serveur>:8000/extension` (ex. `http://nas.local:8000/extension`) et téléchargez
+   le `.crx`. Cette page est publique, tout comme les routes de téléchargement vers lesquelles elle
+   pointe.
+2. Ouvrez `chrome://extensions` et activez le **mode développeur**.
+3. Glissez le `.crx` téléchargé sur la page.
+
+Chrome n'autorise aucune installation en un clic en dehors du Chrome Web Store : le mode
+développeur reste donc nécessaire. La page propose aussi le `.zip` brut si vous préférez
+**Charger l'extension non empaquetée**.
+
+Pour publier une nouvelle version après avoir modifié l'extension, incrémentez `version` dans
+`extension/package.json` puis relancez `docker compose up -d --build` (ou `make publish-extension`).
+Le `.crx` est signé à l'exécution avec une clé stockée dans
+`EZDL_DATA_DIR/extension-signing-key.pem` — gardez ce dossier sur un volume, car Chrome en dérive
+l'identifiant de l'extension et une clé perdue signifie un nouvel identifiant au lieu d'une mise à
+jour.
+
+**Alternative développeur** — construire l'extension localement et la charger non empaquetée :
 
 ```bash
 cd extension
@@ -164,6 +186,7 @@ Tous les réglages serveur sont des variables d'environnement préfixées `EZDL_
 | `EZDL_DOWNLOAD_ROOTS`                | `Downloads=/data/downloads` | Racines de destination autorisées, format `Label=/chemin` séparé par `,`. Seuls ces chemins (et leurs sous-dossiers) sont accessibles en écriture. |
 | `EZDL_DATA_DIR`                      | `/config`                  | Base SQLite + état de l'application                                                                    |
 | `EZDL_TEMP_DIR`                      | `/tmp/ez-dl`                | Espace temporaire pour les fichiers partiels avant le déplacement final                                |
+| `EZDL_EXTENSION_DIST_DIR`            | `/app/extension-dist`      | Artefacts de l'extension empaquetée servis par `/extension`. Intégrés à l'image ; en leur absence, la page d'installation l'explique et les routes de téléchargement renvoient `404`. |
 | `EZDL_MAX_CONCURRENT_JOBS`           | `2`                        | Nombre de workers de la file d'attente                                                                  |
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS`   | `24`                       | Période de la tâche d'auto-update de yt-dlp (`0` la désactive)                                          |
 | `EZDL_YTDLP_BINARY`                  | `yt-dlp`                   | Chemin du binaire yt-dlp                                                                                |

@@ -79,16 +79,20 @@ server/
 │   │   ├── probe.py          # GET/POST /api/probe
 │   │   ├── folders.py        # GET/POST /api/folders (navigation + création sécurisées)
 │   │   ├── jobs.py           # CRUD /api/jobs, pause/resume, GET /api/jobs/events (SSE)
-│   │   └── rules.py          # GET/POST/DELETE /api/rules
+│   │   ├── rules.py          # GET/POST/DELETE /api/rules
+│   │   └── extension.py      # routes publiques /extension* (page, .crx, zip, version)
+│   ├── templates/
+│   │   └── extension.html    # page d'installation servie par GET /extension
 │   └── core/
 │       ├── ytdlp.py           # wrapper subprocess yt-dlp (probe, download, progression)
 │       ├── ffmpeg.py          # wrapper subprocess ffmpeg, détection des encodeurs, presets
 │       ├── queue.py           # file d'attente asyncio, workers, pipeline, pub/sub SSE
 │       ├── workdir.py         # dossier de travail d'un job : fichier produit, nom libre, move
 │       ├── paths.py           # résolution/validation des chemins vs EZDL_DOWNLOAD_ROOTS
+│       ├── crx.py             # packing CRX3 : clé RSA 2048 persistée, signature, cache
 │       └── cookies.py         # écriture du fichier cookies temporaire (0600), nettoyage
-└── tests/                    # pytest : auth, config, cookies, ffmpeg, paths, queue, ytdlp,
-                              # routes jobs et folders
+└── tests/                    # pytest : auth, config, cookies, ffmpeg, paths, queue, ytdlp, crx,
+                              # routes jobs, folders et extension
 ```
 
 ### `extension/`
@@ -169,6 +173,55 @@ autorisée — le serveur répondrait `400`.
 Les fichiers ne sont jamais affichés : `/api/folders` renvoie toutes les entrées, `listSubfolders`
 ne garde que `is_dir` — une destination de téléchargement est toujours un dossier.
 
+#### Publication de l'extension par le serveur
+
+Le serveur distribue l'extension empaquetée, de sorte qu'installer ez-dl sur un nouveau poste ne
+demande ni clone du dépôt ni Node : ouvrir `http://<serveur>:8000/extension`, télécharger le `.crx`,
+le glisser sur `chrome://extensions` (mode développeur activé). La chaîne complète :
+
+```
+build Docker (stage node:22-slim : npm ci && npm run zip)
+   └─▶ /app/extension-dist/{ez-dl-extension.zip, extension-version.txt}   (EZDL_EXTENSION_DIST_DIR)
+          └─▶ signature .crx à l'exécution (clé RSA 2048 persistée dans EZDL_DATA_DIR,
+              .crx mis en cache dans EZDL_DATA_DIR/extension-cache/)
+                 └─▶ GET /extension (page) · /extension/download (.crx) · /extension/zip · /extension/version
+```
+
+Le zip est produit au build par un stage Node dédié, alimenté par le contexte BuildKit nommé
+`extension` (`build.additional_contexts` dans docker-compose) ; **aucun Node ne subsiste dans
+l'image finale**. Une image construite sans ce contexte reste valide : seule la distribution est
+indisponible (page explicative, `404` sur les téléchargements). Le fichier de version
+(`extension-version.txt`) doit contenir une version strictement numérique (`1`, `1.2`, `1.2.3` ou
+`1.2.3.4`) ; toute autre forme est rejetée, et le serveur retombe sur le nom générique
+`ez-dl-extension.crx`.
+
+La signature, elle, se fait à l'exécution : la clé `EZDL_DATA_DIR/extension-signing-key.pem` (0600)
+est générée au premier besoin et **doit être persistée** (volume `./data:/config`) — l'identifiant
+Chrome de l'extension en dérive, et une clé perdue produit un nouvel identifiant, donc une extension
+*différente* aux yeux de Chrome plutôt qu'une mise à jour. Le `.crx` signé est mis en cache dans
+`EZDL_DATA_DIR/extension-cache/`, indexé sur le SHA-256 du zip et non sur son horodatage : un
+rebuild qui change le zip est republié même si son mtime n'a pas avancé (build reproductible,
+restauration de sauvegarde). `GET /extension/version`
+renvoie deux champs supplémentaires : `extension_id` (identifiant Chrome attendu, 32 caractères a-p)
+et `sha256` (empreinte du `.crx` servi) ; les deux valent `null` en cas d'échec de signature. La page
+d'installation affiche ces deux empreintes pour permettre à l'utilisateur de vérifier l'intégrité du
+fichier.
+
+Le dossier `EZDL_EXTENSION_DIST_DIR` (`/app/extension-dist` dans l'image) appartient à `root` : le
+serveur, tournant sous un utilisateur non-root, ne fait que le lire. Motif : le serveur signe le zip
+trouvé dans ce dossier ; une réécriture de ce zip produirait un `.crx` au même identifiant Chrome,
+donc une mise à jour silencieuse de l'extension installée, conservant les permissions déjà
+accordées. Pour la même raison, le serveur refuse de démarrer si une racine `EZDL_DOWNLOAD_ROOTS`
+contient — ou est contenue dans — `EZDL_DATA_DIR` ou `EZDL_EXTENSION_DIST_DIR`.
+
+Republier après un changement du client : bumper `version` dans `extension/package.json`, puis
+`docker compose up -d --build` (ou `make publish-extension`).
+
+Limite connue : Chrome n'autorise aucune installation « en un clic » depuis une page web hors Chrome
+Web Store, le mode développeur reste donc requis. L'installation et la mise à jour silencieuses par
+politique système (`update.xml`, `ExtensionInstallSources`/`ExtensionInstallForcelist`) sont prévues
+plus tard, pas encore disponibles.
+
 #### Bandeau de mise à jour
 
 À l'ouverture, la popup interroge `GET /extension/version` sur le serveur du profil actif (route
@@ -183,10 +236,14 @@ fonctionne dans tous ces cas, il n'y a rien à signaler à l'utilisateur.
 
 ## Contrat d'API
 
-Toutes les routes sont préfixées par `/api`. Authentification obligatoire (`Authorization: Bearer
-<EZDL_PASSWORD>`) sur toutes les routes sauf `GET /api/health`. Voir
+Les routes de pilotage sont préfixées par `/api`. Authentification obligatoire (`Authorization:
+Bearer <EZDL_PASSWORD>`) sur toutes, sauf `GET /api/health`. Voir
 [conventions.md](conventions.md#sécurité) pour la comparaison constant-time et
 [ADR 0003](decisions/0003-auth-mot-de-passe.md) pour le choix de ce schéma d'auth.
+
+Les quatre routes de distribution de l'extension vivent **hors de `/api`** et sont **publiques** :
+elles sont ouvertes depuis la barre d'adresse d'un navigateur, qui ne sait pas joindre d'en-tête
+`Authorization` à un lien ou à un téléchargement.
 
 ```
 GET    /api/health          -> {status:"ok", version, ytdlp_version, ffmpeg_available}  [public]
@@ -210,6 +267,19 @@ GET    /api/jobs/events     -> SSE, event `job` avec le job sérialisé à chaqu
 GET    /api/rules           -> [site_rule]
 POST   /api/rules           -> body {domain, url_pattern, label?, notes?, source:"manual"|"learned"} -> site_rule
 DELETE /api/rules/{id}      -> supprime
+
+GET    /extension           -> page HTML d'installation : versions extension + serveur, bouton de
+                               téléchargement, 3 étapes, identifiant et empreinte SHA-256,
+                               lien secondaire vers le zip                                  [public]
+GET    /extension/download  -> .crx signé, media type application/x-chrome-extension,
+                               nom ez-dl-extension-<version>.crx ; 404 explicite si l'image
+                               ne contient pas l'artefact                                   [public]
+GET    /extension/zip       -> zip brut (voie « Charger l'extension non empaquetée », dev) ;
+                               404 explicite si l'artefact est absent                       [public]
+GET    /extension/version   -> {available, version, filename, size, extension_id, sha256} ;
+                               200 {"available": false, "version": null, "extension_id": null,
+                               "sha256": null, …} si aucun artefact ou échec de signature
+                               (jamais 404) — consommée par la popup                        [public]
 ```
 
 ## Modèle de données

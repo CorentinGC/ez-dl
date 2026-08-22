@@ -126,7 +126,26 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 See [`docs/en/modules/conversion.md`](docs/en/modules/conversion.md#nvenc-support-in-the-docker-image)
 for details.
 
-### 2. Load the extension
+### 2. Install the extension
+
+The server publishes the packaged extension itself — no clone, no Node.js needed on the machine
+you install it from.
+
+1. Open `http://<server>:8000/extension` (e.g. `http://nas.local:8000/extension`) and download the
+   `.crx`. That page is public, like the download routes it links to.
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Drag the downloaded `.crx` onto the page.
+
+Chrome does not allow one-click installs from outside the Chrome Web Store, so Developer mode
+stays required. The page also links the raw `.zip` if you prefer **Load unpacked**.
+
+To publish a new build after changing the extension, bump `version` in `extension/package.json`
+and rerun `docker compose up -d --build` (or `make publish-extension`). The `.crx` is signed at
+runtime with a key stored in `EZDL_DATA_DIR/extension-signing-key.pem` — keep that directory on a
+volume, since Chrome derives the extension ID from it and a lost key means a new ID instead of an
+update.
+
+**Developer alternative** — build it locally and load it unpacked:
 
 ```bash
 cd extension
@@ -161,6 +180,7 @@ for a ready-to-copy file.
 | `EZDL_DOWNLOAD_ROOTS`                | `Downloads=/data/downloads` | Allowed destination roots, format `Label=/path` separated by `,`. Only these paths (and their subfolders) are writable. |
 | `EZDL_DATA_DIR`                      | `/config`                 | SQLite database + app state                                                                        |
 | `EZDL_TEMP_DIR`                      | `/tmp/ez-dl`               | Scratch space for partial files before the final move                                              |
+| `EZDL_EXTENSION_DIST_DIR`            | `/app/extension-dist`     | Packaged extension artifacts served by `/extension`. Built into the image; if absent, the install page explains it and the download routes return `404`. |
 | `EZDL_MAX_CONCURRENT_JOBS`           | `2`                       | Queue worker count                                                                                   |
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS`   | `24`                      | Period of the yt-dlp self-update task (`0` disables it)                                             |
 | `EZDL_YTDLP_BINARY`                  | `yt-dlp`                  | Path to the yt-dlp binary                                                                            |

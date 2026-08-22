@@ -72,6 +72,10 @@ jobs:
         working-directory: extension
         run: npm run build
 
+      - name: Empaquetage (zip publié par le serveur)
+        working-directory: extension
+        run: npm run zip
+
       - name: Upload de l'artefact extension
         uses: actions/upload-artifact@v7
         with:
@@ -88,6 +92,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Build de l'image serveur (sans push)
+      - name: Build de l'image serveur avec l'extension (chemin de production)
         working-directory: server
-        run: docker build -t ez-dl-server:ci .
+        # Reproduit `additional_contexts` de docker-compose.yml : l'extension est buildée
+        # dans l'image et servie sur /extension.
+        run: docker build --build-context extension=../extension -t ez-dl-server:ci .
+
+      - name: Vérifier que l'extension est bien embarquée
+        run: |
+          docker run --rm --entrypoint sh ez-dl-server:ci \
+            -c 'test -s /app/extension-dist/ez-dl-extension.zip && test -s /app/extension-dist/extension-version.txt'
+
+      - name: Build de l'image serveur sans l'extension (repli dégradé)
+        working-directory: server
+        # Un `docker build` nu doit rester possible : le serveur démarre, seule la
+        # distribution de l'extension est indisponible.
+        # --no-cache-filter : sans lui, BuildKit réutilise la couche `extension-zip` du build
+        # précédent et l'image de repli embarquerait l'extension — le test ne validerait rien.
+        run: docker build --no-cache-filter extension-zip -t ez-dl-server:ci-noext .
+
+      - name: Vérifier que le repli produit une image sans artefact
+        run: |
+          test -z "$(docker run --rm --entrypoint sh ez-dl-server:ci-noext -c 'ls -A /app/extension-dist/')"
