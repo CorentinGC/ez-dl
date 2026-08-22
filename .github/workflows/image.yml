@@ -188,6 +188,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Vérifier que des tags ont été calculés
+        # Sans tag, `imagetools create` échoue sur une ligne de commande tronquée et le
+        # message ne dit rien de la cause. Le cas s'est produit : metadata-action tire la
+        # version de github.ref, qui n'est pas le tag sur un appel workflow_call.
+        run: |
+          count="$(jq -r '.tags | length' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::metadata-action n'a calculé aucun tag : vérifier l'entrée tags du workflow appelant." >&2
+            exit 1
+          fi
+
       - name: Assembler l'index et poser les tags
         working-directory: /tmp/digests
         run: |

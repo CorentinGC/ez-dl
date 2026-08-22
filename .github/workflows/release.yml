@@ -84,9 +84,13 @@ jobs:
       ref: ${{ inputs.ref || github.ref_name }}
       # `latest=auto` (défaut de metadata-action) pose `latest` sur tout tag semver non
       # préversion — c'est ce que suit un déploiement watchtower en profil `autoupdate`.
+      #
+      # `value=` est obligatoire : sans lui, metadata-action tire le numéro de version de
+      # `github.ref`, qui vaut `refs/heads/main` sur un appel `workflow_call` (release
+      # automatique). Aucun tag n'était alors généré et `imagetools create` échouait.
       tags: |
-        type=semver,pattern={{version}}
-        type=semver,pattern={{major}}.{{minor}}
+        type=semver,pattern={{version}},value=${{ inputs.ref || github.ref_name }}
+        type=semver,pattern={{major}}.{{minor}},value=${{ inputs.ref || github.ref_name }}
 
   release:
     name: GitHub Release
