@@ -170,8 +170,17 @@ sont dérivés du **chemin** : pour un dossier imbriqué, le serveur renvoie dan
 label de la *racine*, pas celui du dossier ouvert. Aucun segment ne pointe au-dessus d'une racine
 autorisée — le serveur répondrait `400`.
 
-Les fichiers ne sont jamais affichés : `/api/folders` renvoie toutes les entrées, `listSubfolders`
+Les fichiers ne sont jamais affichés : `/api/folders` renvoie les entrées, `listSubfolders`
 ne garde que `is_dir` — une destination de téléchargement est toujours un dossier.
+
+Le serveur **masque les entrées cachées et système** du listing (préfixe `.`, et les dossiers de
+métadonnées NAS/OS : `@eaDir`, `#recycle`, `#snapshot`, `@Recycle`, `$RECYCLE.BIN`,
+`System Volume Information`, `lost+found`, `Thumbs.db` — `is_system_entry`, `core/paths.py`), et
+**refuse tout chemin traversant un nom système** comme destination (`400`), y compris via un favori
+client obsolète ou `POST /api/folders`. Cas vécu : une racine Synology dont le seul sous-dossier
+visible était `@eaDir` — l'utilisateur n'avait que lui à choisir et le téléchargement partait dans
+un dossier masqué par DSM. Les dot-dossiers restent des destinations explicites valides : ils sont
+cachés du navigateur, pas interdits.
 
 #### Publication de l'extension par le serveur
 
@@ -254,6 +263,7 @@ GET    /api/probe?url=...   -> {url,title,uploader,duration,thumbnail,extractor,
        (POST /api/probe accepte en plus {cookies, headers, referer} pour les pages authentifiées)
 GET    /api/folders?path=   -> {roots:[{label,path,is_available,free_bytes,total_bytes}],
                                 current:{path,label,free_bytes,total_bytes}, entries:[{name,path,is_dir}], parent}
+       (entries exclut les entrées cachées `.` et système — @eaDir, #recycle… ; naviguer dedans -> 400)
 POST   /api/folders         -> body {parent, name} -> 201 {name,path,is_dir}  (409 si déjà existant)
 POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?}
                             -> {job_id, status}

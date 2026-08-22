@@ -169,8 +169,17 @@ client-side from `roots[]` and `current.path`, and its intermediate labels are d
 **path**: for a nested folder the server returns the *root*'s label in `current.label`, not the
 open folder's. No segment ever points above an allowed root — the server would answer `400`.
 
-Files are never shown: `/api/folders` returns every entry, `listSubfolders` keeps only `is_dir` —
+Files are never shown: `/api/folders` returns the entries, `listSubfolders` keeps only `is_dir` —
 a download destination is always a directory.
+
+The server **hides hidden and system entries** from the listing (`.` prefix, and NAS/OS metadata
+folders: `@eaDir`, `#recycle`, `#snapshot`, `@Recycle`, `$RECYCLE.BIN`,
+`System Volume Information`, `lost+found`, `Thumbs.db` — `is_system_entry`, `core/paths.py`), and
+**rejects any path traversing a system name** as a destination (`400`), including through a stale
+client favorite or `POST /api/folders`. Real-world case: a Synology root whose only visible
+subfolder was `@eaDir` — the user had nothing else to pick and the download landed in a folder DSM
+hides. Dot-folders remain valid explicit destinations: they are hidden from the browser, not
+forbidden.
 
 #### Extension publishing by the server
 
@@ -251,6 +260,7 @@ GET    /api/probe?url=...   -> {url,title,uploader,duration,thumbnail,extractor,
        (POST /api/probe additionally accepts {cookies, headers, referer} for authenticated pages)
 GET    /api/folders?path=   -> {roots:[{label,path,is_available,free_bytes,total_bytes}],
                                 current:{path,label,free_bytes,total_bytes}, entries:[{name,path,is_dir}], parent}
+       (entries excludes hidden `.` and system entries — @eaDir, #recycle…; browsing into one -> 400)
 POST   /api/folders         -> body {parent, name} -> 201 {name,path,is_dir}  (409 if already there)
 POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?}
                             -> {job_id, status}

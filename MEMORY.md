@@ -144,6 +144,13 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   extension, fichier temporaire `0600` supprimé après usage.
 - **Chemins de destination** : toujours vérifiés comme descendants d'une racine
   `EZDL_DOWNLOAD_ROOTS` avant toute écriture — y compris pour la navigation `/api/folders`.
+- **Dossiers système NAS (`@eaDir`…) — ez-dl-5yn** : une racine Synology peut n'avoir QU'un
+  sous-dossier `@eaDir` (vignettes DSM, masqué côté NAS) — le folder browser ne proposait que lui
+  et le DL devenait « invisible » (vécu en prod helmut sur `/data/pron`). Depuis f5a80de :
+  `is_system_entry()` (`core/paths.py`) masque entrées cachées `.` + noms système du listing, et
+  `resolve_folder`/`resolve_destination` refusent tout composant système sous la racine (400).
+  Les dot-dossiers restent des destinations explicites valides. Un job « done » n'affichait pas
+  son dossier dans la popup → affiché sur chaque ligne depuis f6a7f60.
 - **`ffmpeg` de Debian n'a pas NVENC** (dépendances non-libres exclues) : résolu par la variante
   `FFMPEG_VARIANT=nvenc` du Dockerfile (binaire statique BtbN, amd64 only) — c'est elle qu'active
   `docker-compose.gpu.yml`, le passthrough GPU seul ne suffit pas. Rebuild avec `--build` requis.
