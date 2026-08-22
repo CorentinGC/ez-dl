@@ -55,4 +55,6 @@
 - [README.md](README.md) : présentation du projet, installation rapide, licence.
 - [CHANGELOG.md](CHANGELOG.md) : journal des versions publiées (miroir français :
   [CHANGELOG.fr.md](CHANGELOG.fr.md)). Canaux d'image : `latest`/`X.Y.Z`/`X.Y` pour les tags
-  semver, `edge`/`main-<sha>` pour la branche `main`.
+  semver, `edge`/`main-<sha>` pour la branche `main`. Publication AUTOMATIQUE : le type des
+  Conventional Commits poussés sur `main` décide de la version (`feat` → mineure, `fix` → patch,
+  le reste → rien), la CI tague et publie dans le même run.

@@ -7,6 +7,9 @@ may carry a breaking change.
 
 French version: [CHANGELOG.fr.md](CHANGELOG.fr.md).
 
+Entries below the `[Unreleased]` heading are generated from Conventional Commits when CI
+publishes a version; anything written by hand under that heading is kept above them.
+
 Published artifacts for a version `X.Y.Z`:
 
 - Docker image `ghcr.io/corentingc/ez-dl:X.Y.Z`, `:X.Y` and `:latest` (linux/amd64 + linux/arm64)

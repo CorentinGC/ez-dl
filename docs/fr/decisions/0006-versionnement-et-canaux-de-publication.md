@@ -39,12 +39,32 @@ manifeste d'une extension, et une préversion (`0.2.0-rc1`) est recopiée telle 
 `/extension/version` — silencieusement. Le projet reste en `0.x` : une version mineure peut
 contenir une rupture.
 
-### C'est le tag git qui publie
+### La publication est automatique, déclenchée par le contenu des commits
 
-`scripts/release.sh X.Y.Z` prépare tout localement (versions, `uv lock`, promotion du CHANGELOG,
-lint, tests, commit, tag annoté) et **ne pousse jamais**. Le push du tag déclenche
-`.github/workflows/release.yml`. Un tag publié ne se déplace jamais : une correction donne le
-patch suivant.
+Aucun geste de release. À chaque push vert sur `main`, la CI lit les **Conventional Commits**
+depuis le dernier tag et en déduit s'il y a une version à publier, et laquelle :
+
+| Commits depuis le dernier tag | Effet |
+|---|---|
+| `feat:`, ou une rupture (`type!:`, `BREAKING CHANGE:`) | version **mineure** |
+| `fix:`, `perf:`, `revert:` | version **patch** |
+| `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `style:` | **aucune publication** |
+
+Une rupture donne une mineure et non une majeure : le projet est en `0.x`, où le contrat semver
+autorise la rupture sur une mineure.
+
+Quand une version est due, la CI écrit les numéros, remplit le CHANGELOG depuis les sujets de
+commits, relance `uv lock`, rejoue lint et tests, committe `chore(release): X.Y.Z [skip ci]`,
+pousse le tag, puis publie — le tout dans le **même run**, parce qu'un tag créé avec le
+`GITHUB_TOKEN` ne déclenche aucun workflow (garde-fou anti-boucle de GitHub).
+
+`scripts/release.sh X.Y.Z` reste utilisable à la main (il ne pousse jamais) pour une release
+hors bande ; un tag poussé par un humain déclenche `release.yml` normalement. Un tag publié ne se
+déplace jamais : une correction donne le patch suivant.
+
+Le texte des entrées de CHANGELOG est le sujet des commits, donc en français dans les deux
+fichiers ; seuls les titres de section sont traduits. Traduire automatiquement des messages de
+commit produirait des notes fausses.
 
 ### Canaux d'image
 
@@ -82,8 +102,13 @@ conteneur déjà lancé non-root (`user:` en compose) saute toute cette phase.
 - **Le déploiement qui suivait `latest` ne se met plus à jour à chaque commit.** C'est le but,
   mais c'est un changement de comportement pour les installations existantes : sans tag semver
   publié, elles se figent.
-- Publier demande désormais un geste explicite (`release.sh` puis push du tag) et une entrée de
-  CHANGELOG dans les deux langues — `release.sh` refuse une section `[Unreleased]` vide.
+- **Le message de commit devient un acte de publication.** Un `feat:` poussé sur `main` publie
+  une version, à toute heure. Avec plusieurs sessions qui poussent en parallèle sur ce dépôt,
+  cela produit des versions en rafale : c'est le prix assumé du « zéro geste ». Le levier de
+  contrôle est le type de commit — `refactor:` ou `chore:` ne publient rien.
+- La CI écrit sur `main` (commit de bump). En cas de course avec un autre push, la release est
+  **abandonnée** proprement et recalculée au push suivant, plutôt que de rebaser un commit déjà
+  tagué.
 - La fenêtre root de l'entrypoint est un vrai changement de posture pour un projet qui était
   non-root de bout en bout. Assumée et documentée dans `SECURITY.md`.
 - La CI construit deux images par run au lieu d'une. Coût absorbé par le cache `type=gha` séparé
@@ -94,6 +119,15 @@ conteneur déjà lancé non-root (`user:` en compose) saute toute cette phase.
 
 - **Tagger `latest` sur `main` et publier en plus des versions** : les deux canaux sur le même tag
   ne peuvent pas coexister ; c'est exactement l'ambiguïté qui rendait le déploiement imprévisible.
+- **Une branche `dev` séparée de `main`** : le tag encode déjà la distinction stable/instable, et
+  `edge` publie déjà le flux continu. La branche n'aurait rien retiré — il faut de toute façon un
+  tag pour numéroter, épingler et revenir en arrière — tout en ajoutant une étape de merge et en
+  faisant de tout push sur `main` une publication.
+- **`release-please` (PR de release à merger)** : plus prudent, mais c'est un geste de release, et
+  la demande était explicitement zéro geste.
+- **`semantic-release` (l'outil npm)** : même sémantique que ce qui est implémenté, au prix d'une
+  chaîne de dépendances npm dans la CI et d'un CHANGELOG unique généré — or ce dépôt en maintient
+  deux, FR et EN, et le numéro de version vit dans `pyproject.toml`, pas dans un `package.json`.
 - **QEMU pour l'arm64** : simple à écrire, mais `npm ci` émulé rend chaque run interminable.
 - **Publier la variante GPU** : elle dépend du matériel de l'hôte et ne se valide pas en CI.
 - **Garder `PUID` en ARG et documenter le rebuild** : la voie facile disparaît pour tous les hôtes

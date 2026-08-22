@@ -110,3 +110,101 @@ jobs:
       tags: |
         type=raw,value=edge
         type=sha,prefix=main-,format=short
+
+  auto-release:
+    name: Version automatique
+    runs-on: ubuntu-latest
+    # Une version n'est publiée que si lint, tests et les deux images sont verts.
+    needs: [server, extension, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.confirm.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          # Historique complet : le calcul de version remonte au dernier tag.
+          fetch-depth: 0
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Installer uv
+        # Tag exact : astral-sh ne publie pas de tag majeur flottant (pas de v10)
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "server/uv.lock"
+
+      - name: Installer les dépendances (uv sync)
+        working-directory: server
+        run: uv sync
+
+      - name: Calculer la prochaine version
+        # Vide = aucun commit à impact de version depuis le dernier tag (doc, chore,
+        # refactor…) : le run s'arrête là et seul le canal `edge` a été publié.
+        id: compute
+        run: |
+          version="$(scripts/next-version.sh --explain)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -z "$version" ]; then
+            echo "Aucune version à publier." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Version à publier : **$version**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Identité git
+        if: steps.compute.outputs.version != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Préparer la release
+        if: steps.compute.outputs.version != ''
+        # release.sh réécrit les versions, remplit le CHANGELOG depuis les Conventional
+        # Commits (--auto), relance uv lock, vérifie, commit et tague — sans pousser.
+        run: scripts/release.sh "${{ steps.compute.outputs.version }}" --auto
+
+      - name: Pousser le commit de version et le tag
+        if: steps.compute.outputs.version != ''
+        # Course possible : une autre session peut avoir poussé sur main pendant la
+        # préparation. Dans ce cas la release est abandonnée proprement — le prochain push
+        # sur main la recalculera — plutôt que de rebaser un commit déjà tagué.
+        run: |
+          version="${{ steps.compute.outputs.version }}"
+          if ! git push origin main; then
+            echo "main a avancé pendant la préparation — release reportée au prochain push." \
+              >> "$GITHUB_STEP_SUMMARY"
+            git tag -d "v$version"
+            exit 0
+          fi
+          git push origin "v$version"
+
+      - name: Confirmer le tag publié
+        # Le job de publication ne doit se lancer que si le tag existe vraiment côté
+        # origin : sur abandon (course perdue), la sortie repart vide.
+        id: confirm
+        run: |
+          version="${{ steps.compute.outputs.version }}"
+          if [ -n "$version" ] \
+            && git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-release:
+    name: Publication
+    needs: [auto-release]
+    if: needs.auto-release.outputs.version != ''
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      packages: write
+    with:
+      ref: v${{ needs.auto-release.outputs.version }}

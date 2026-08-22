@@ -156,21 +156,31 @@ Format **strictement numérique** (`X.Y.Z`, 1 à 4 nombres) : Chrome refuse tout
 dans le manifeste d'une extension, et une préversion comme `0.2.0-rc1` fait renvoyer
 `version: null` par `/extension/version`, sans erreur visible.
 
-Publier une version :
+**Publier est automatique** : rien à lancer. À chaque push vert sur `main`, la CI lit les
+Conventional Commits depuis le dernier tag et publie si nécessaire.
+
+| Ce que vous écrivez | Ce que ça publie |
+|---|---|
+| `feat: …` ou une rupture (`type!:`, `BREAKING CHANGE:` en pied) | version **mineure** |
+| `fix: …`, `perf: …`, `revert: …` | version **patch** |
+| `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `style:` | rien (canal `edge` seulement) |
+
+Le **type de commit est donc un acte de publication** : un `feat:` poussé sur `main` sort une
+version, image GHCR et GitHub Release comprises. Un travail qui ne doit pas déclencher de version
+se commite en `refactor:` ou `chore:`.
+
+Les entrées de CHANGELOG sont générées depuis les sujets de commits — d'où l'importance d'un sujet
+lisible par un utilisateur, pas par un mainteneur. Ce qui est écrit à la main sous
+`## [Unreleased]` est conservé au-dessus des entrées générées.
+
+Vérifier ou publier à la main reste possible :
 
 ```bash
-scripts/check-version.sh          # cohérence pyproject / APP_VERSION / package.json / uv.lock
-scripts/release.sh 0.2.0          # réécrit les versions, promeut le CHANGELOG, commit + tag
-scripts/release.sh 0.2.0 --dry-run  # pour voir ce qui serait fait, sans rien écrire
+scripts/check-version.sh            # cohérence pyproject / APP_VERSION / package.json / uv.lock
+scripts/next-version.sh --explain   # ce que la CI publierait maintenant, et pourquoi
+scripts/release.sh 0.2.0 --dry-run  # ce qui serait fait, sans rien écrire
+scripts/release.sh 0.2.0            # release hors bande : commit + tag locaux, aucun push
 ```
-
-`release.sh` ne pousse **jamais** : il affiche la commande de push à lancer à la main. C'est le
-push du **tag** qui déclenche `.github/workflows/release.yml` (image GHCR `X.Y.Z`, `X.Y` et
-`latest` en amd64 + arm64, puis GitHub Release).
-
-Toute modification visible par un utilisateur s'ajoute sous `## [Unreleased]` dans
-`CHANGELOG.md` **et** `CHANGELOG.fr.md`, dans le même commit — `release.sh` refuse de publier
-une version dont la section est vide.
 
 Canaux d'image publiés :
 
@@ -187,7 +197,7 @@ Un tag publié ne se déplace jamais : une correction donne le patch suivant.
 - [ ] Tests ajoutés/mis à jour et passants (`uv run pytest`, et Vitest le cas échéant)
 - [ ] `README`/`README.fr.md` et/ou `docs/` mis à jour si le comportement ou la configuration ont
       changé
-- [ ] Changements visibles par l'utilisateur ajoutés sous `## [Unreleased]` dans `CHANGELOG.md`
-      **et** `CHANGELOG.fr.md`
+- [ ] Le type de commit correspond à l'intention (`feat:`/`fix:` publient une version,
+      `chore:`/`refactor:` non)
 - [ ] Aucune information personnelle, aucun code de contournement de DRM
 - [ ] Les commits suivent Conventional Commits et sont signés (`-s`)

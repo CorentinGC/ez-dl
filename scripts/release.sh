@@ -11,6 +11,7 @@ set -eu
 
 REPO_ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 IS_DRY_RUN=false
+IS_AUTO=false
 
 log() { printf 'release: %s\n' "$*"; }
 die() { printf 'release: ÉCHEC — %s\n' "$*" >&2; exit 1; }
@@ -28,6 +29,9 @@ parse_args() {
     for arg in "$@"; do
         case "$arg" in
             --dry-run) IS_DRY_RUN=true ;;
+            # Mode CI : la section [Unreleased] est remplie depuis les Conventional
+            # Commits au lieu d'être rédigée à la main.
+            --auto) IS_AUTO=true ;;
             -*) die "option inconnue : $arg" ;;
             *) [ -z "$version" ] || die "une seule version attendue"; version="${arg#v}" ;;
         esac
@@ -52,7 +56,33 @@ check_worktree() {
     log "branche main, arbre propre, tag v$version libre"
 }
 
+generate_changelog_entries() {
+    [ "$IS_AUTO" = true ] || return 0
+    # Une section déjà rédigée à la main pour cette version gagne : elle n'est pas doublée
+    # par des entrées générées.
+    if grep -q "^## \\[$version\\]" "$REPO_ROOT/CHANGELOG.md"; then
+        log "section [$version] déjà rédigée — génération sautée"
+        return 0
+    fi
+    if [ "$IS_DRY_RUN" = true ]; then
+        log "[dry-run] remplirait [Unreleased] depuis les commits"
+        return 0
+    fi
+    export REPO_ROOT
+    FR_ENTRIES="$("$REPO_ROOT/scripts/changelog-entries.sh" fr)" \
+        EN_ENTRIES="$("$REPO_ROOT/scripts/changelog-entries.sh" en)" \
+        python3 "$REPO_ROOT/scripts/fill-changelog.py"
+    log "entrées de CHANGELOG générées depuis les commits"
+}
+
 check_changelog_has_content() {
+    # Section déjà rédigée pour cette version (cas de la toute première release, écrite à
+    # la main) : il n'y a rien à promouvoir depuis [Unreleased], donc rien à vérifier ici.
+    if grep -q "^## \[$version\]" "$REPO_ROOT/CHANGELOG.md" \
+        && grep -q "^## \[$version\]" "$REPO_ROOT/CHANGELOG.fr.md"; then
+        log "section [$version] déjà présente dans les deux CHANGELOG"
+        return 0
+    fi
     # Publier une version dont la section est vide donne une GitHub Release sans notes et
     # un utilisateur incapable de savoir ce qui a changé. Vérifié AVANT toute écriture.
     for file in CHANGELOG.md CHANGELOG.fr.md; do
@@ -153,7 +183,19 @@ verify() {
 commit_and_tag() {
     run git -C "$REPO_ROOT" add server/pyproject.toml server/uv.lock extension/package.json \
         CHANGELOG.md CHANGELOG.fr.md
-    run git -C "$REPO_ROOT" commit -m "chore(release): $version"
+    # [skip ci] en mode auto : le commit est poussé PAR la CI, qui publie déjà dans le
+    # même run. (Un push fait avec le GITHUB_TOKEN ne redéclenche de toute façon aucun
+    # workflow — la mention reste pour qui lit l'historique.)
+    message="chore(release): $version"
+    [ "$IS_AUTO" = true ] && message="$message [skip ci]"
+    # Rien à committer = la version et le CHANGELOG étaient déjà à jour (cas de la toute
+    # première release, préparée à la main). Le tag se pose alors sur HEAD tel quel :
+    # `git commit` refuserait un index vide et ferait échouer la release.
+    if [ "$IS_DRY_RUN" = false ] && git -C "$REPO_ROOT" diff --cached --quiet; then
+        log "aucun changement de version à committer — tag posé sur HEAD"
+    else
+        run git -C "$REPO_ROOT" commit -m "$message"
+    fi
     run git -C "$REPO_ROOT" tag -a "v$version" -m "ez-dl $version"
     log "commit et tag v$version créés localement"
 }
@@ -176,6 +218,7 @@ EOF
 main() {
     parse_args "$@"
     check_worktree
+    generate_changelog_entries
     check_changelog_has_content
     write_versions
     promote_changelog

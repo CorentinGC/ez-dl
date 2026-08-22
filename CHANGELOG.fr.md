@@ -7,6 +7,10 @@ peut donc contenir une rupture.
 
 English version: [CHANGELOG.md](CHANGELOG.md).
 
+Les entrées sous le titre `[Unreleased]` sont générées depuis les Conventional Commits au
+moment où la CI publie une version ; ce qui est écrit à la main sous ce titre est conservé
+au-dessus.
+
 Artefacts publiés pour une version `X.Y.Z` :
 
 - image Docker `ghcr.io/corentingc/ez-dl:X.Y.Z`, `:X.Y` et `:latest` (linux/amd64 + linux/arm64)

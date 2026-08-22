@@ -11,9 +11,13 @@ côté utilisateur. Auto-update du déploiement : **ADR 0005**, **amendée par A
 `ghcr.io/corentingc/ez-dl` en **amd64 + arm64**, service watchtower opt-in dans le
 compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local :
 `deploy/auto-update.sh` par cron (`EZDL_AUTO_UPDATE=true`), les deux voies sont exclusives.
-Canaux depuis ADR 0006 : `latest`/`X.Y.Z`/`X.Y` = tags git semver uniquement (workflow
-`release.yml`, déclenché par le push d'un tag, préparé par `scripts/release.sh`) ; `edge` et
-`main-<sha>` = chaque commit vert sur `main` (`ci.yml`). **Un déploiement sur `latest` se fige
+Canaux depuis ADR 0006 : `latest`/`X.Y.Z`/`X.Y` = versions taguées uniquement ; `edge` et
+`main-<sha>` = chaque commit vert sur `main` (`ci.yml`). **Publication automatique** : le job
+`auto-release` de `ci.yml` lit les Conventional Commits depuis le dernier tag (`feat`/rupture →
+mineure, `fix`/`perf`/`revert` → patch, le reste → rien), fait le bump via
+`scripts/release.sh --auto`, pousse le tag et appelle `release.yml` **dans le même run** — un
+tag créé avec le `GITHUB_TOKEN` ne déclenche aucun workflow. Conséquence : un `feat:` poussé sur
+`main` publie une version. **Un déploiement sur `latest` se fige
 tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des réglages d'exécution
 (entrypoint root → chown → `gosu`), plus des ARG de build.
 

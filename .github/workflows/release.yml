@@ -6,6 +6,15 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  # Appelé par ci.yml après une release automatique : un tag créé avec le GITHUB_TOKEN ne
+  # déclenche AUCUN workflow (garde-fou anti-boucle de GitHub), la publication doit donc
+  # vivre dans le même run que la création du tag.
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag à publier (`v0.2.0`). Vide = la ref du déclencheur.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -13,8 +22,13 @@ permissions:
 # Pas d'annulation : couper une release en cours laisserait un index multi-arch à moitié
 # assemblé sur GHCR, ou une Release sans ses assets.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
+
+env:
+  # La ref à publier, et le tag dont on tire le numéro de version. `github.ref_name` vaut
+  # déjà `vX.Y.Z` quand un humain pousse un tag.
+  RELEASE_REF: ${{ inputs.ref || github.ref_name }}
 
 jobs:
   guard:
@@ -23,6 +37,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Installer Node.js
         uses: actions/setup-node@v7
@@ -43,7 +59,7 @@ jobs:
       - name: Vérifier que le tag, le code et le CHANGELOG concordent
         # Un tag qui ne correspond pas à server/pyproject.toml publierait une image dont
         # /api/health annonce une autre version que celle de l'image.
-        run: scripts/check-version.sh "${GITHUB_REF_NAME}"
+        run: scripts/check-version.sh "${RELEASE_REF}"
 
       - name: Tests serveur
         working-directory: server
@@ -65,6 +81,7 @@ jobs:
       packages: write
     with:
       should_push: true
+      ref: ${{ inputs.ref || github.ref_name }}
       # `latest=auto` (défaut de metadata-action) pose `latest` sur tout tag semver non
       # préversion — c'est ce que suit un déploiement watchtower en profil `autoupdate`.
       tags: |
@@ -80,11 +97,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Extraire les notes de version
         id: notes
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_REF#v}"
           {
             scripts/changelog-section.sh "$version"
             printf '\n---\n\n'
@@ -92,7 +111,7 @@ jobs:
             printf 'Image : `docker pull ghcr.io/%s:%s` (linux/amd64 + linux/arm64)\n' \
               "${GITHUB_REPOSITORY,,}" "$version"
             printf '\nNotes en français : [CHANGELOG.fr.md](%s/blob/%s/CHANGELOG.fr.md)\n' \
-              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "${RELEASE_REF}"
           } > /tmp/release-notes.md
           cat /tmp/release-notes.md
 
@@ -113,6 +132,9 @@ jobs:
       - name: Publier la release
         uses: softprops/action-gh-release@v3
         with:
+          # Explicite : sur un appel `workflow_call`, github.ref est la branche appelante,
+          # pas le tag — sans ce champ la Release serait créée sur `main`.
+          tag_name: ${{ env.RELEASE_REF }}
           body_path: /tmp/release-notes.md
           files: /tmp/assets/*
           fail_on_unmatched_files: false

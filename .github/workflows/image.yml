@@ -15,6 +15,13 @@ on:
         description: Configuration `tags` de docker/metadata-action, une par ligne
         type: string
         default: ""
+      ref:
+        description: >-
+          Ref à builder. Indispensable pour une release automatique : le commit de bump
+          de version est créé PENDANT le run, donc après le commit qui a déclenché le
+          workflow — builder ce dernier publierait une image annonçant l'ancienne version.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -44,6 +51,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Configurer Buildx
         uses: docker/setup-buildx-action@v4

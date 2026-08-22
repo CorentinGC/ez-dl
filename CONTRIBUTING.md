@@ -141,21 +141,31 @@ The format is **strictly numeric** (`X.Y.Z`, 1 to 4 numbers): Chrome rejects any
 extension manifest, and a prerelease such as `0.2.0-rc1` makes `/extension/version` return
 `version: null` with no visible error.
 
-Releasing a version:
+**Releasing is automatic**: nothing to run. On every green push to `main`, CI reads the
+Conventional Commits since the last tag and publishes if needed.
+
+| What you write | What it publishes |
+|---|---|
+| `feat: …` or a breaking change (`type!:`, `BREAKING CHANGE:` footer) | **minor** version |
+| `fix: …`, `perf: …`, `revert: …` | **patch** version |
+| `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `style:` | nothing (`edge` channel only) |
+
+The **commit type is therefore a publishing act**: a `feat:` pushed to `main` ships a version,
+GHCR image and GitHub Release included. Work that must not trigger a version goes in as
+`refactor:` or `chore:`.
+
+CHANGELOG entries are generated from commit subjects — so write subjects a user can read, not
+just a maintainer. Anything hand-written under `## [Unreleased]` is kept above the generated
+entries.
+
+Checking or releasing by hand is still possible:
 
 ```bash
-scripts/check-version.sh          # pyproject / APP_VERSION / package.json / uv.lock agree
-scripts/release.sh 0.2.0          # rewrites versions, promotes the CHANGELOG, commits + tags
+scripts/check-version.sh            # pyproject / APP_VERSION / package.json / uv.lock agree
+scripts/next-version.sh --explain   # what CI would publish right now, and why
 scripts/release.sh 0.2.0 --dry-run  # show what it would do, write nothing
+scripts/release.sh 0.2.0            # out-of-band release: local commit + tag, no push
 ```
-
-`release.sh` **never** pushes: it prints the push command for you to run. Pushing the **tag** is
-what triggers `.github/workflows/release.yml` (GHCR image `X.Y.Z`, `X.Y` and `latest` for amd64 +
-arm64, then a GitHub Release).
-
-Any user-visible change goes under `## [Unreleased]` in `CHANGELOG.md` **and**
-`CHANGELOG.fr.md`, in the same commit — `release.sh` refuses to publish a version whose section
-is empty.
 
 Published image channels:
 
@@ -171,6 +181,6 @@ A published tag is never moved: a fix gets the next patch version.
 - [ ] Code follows the style rules above (ruff clean / `npm run compile` clean)
 - [ ] Tests added/updated and passing (`uv run pytest`, and Vitest where applicable)
 - [ ] `README`/`README.fr.md` and/or `docs/` updated if behavior or configuration changed
-- [ ] User-visible changes added under `## [Unreleased]` in `CHANGELOG.md` **and** `CHANGELOG.fr.md`
+- [ ] Commit type matches the intent (`feat:`/`fix:` publish a version, `chore:`/`refactor:` do not)
 - [ ] No personal information, no DRM-bypass code
 - [ ] Commits follow Conventional Commits and are signed off (`-s`)
