@@ -1,5 +1,12 @@
 **English** | [Français](README.fr.md)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo-light.svg" alt="ez-dl" width="198">
+  </picture>
+</p>
+
 # ez-dl
 
 **Self-hosted video downloads, one click from your browser.**

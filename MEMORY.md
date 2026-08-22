@@ -123,6 +123,17 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
       chemin où Chrome vérifie une extension hors Web Store sans preuve d'éditeur — suite dans
       `ez-dl-upc` (`/extension/update.xml` + `update_url` + politiques par OS). 153 tests pytest.
       2026-08-22.
+- [x] **Lot marque** (`ez-dl-n4d`, `ez-dl-hwn`, `ez-dl-gmz`, `ez-dl-7bq`, `ez-dl-hie`,
+      `ez-dl-dwg`) : identité visuelle complète — flèche pleine plongeant dans un bac tracé,
+      accent produit `#2563eb` / `#3b82f6`. Sources SVG et pipeline de rendu dans `assets/`
+      (`make assets`, `@resvg/resvg-js` + conteneur ICO écrit à la main), PNG **commités** pour
+      que ni la CI ni Docker n'aient besoin de npm. Livrés : icônes d'extension 16→128 (le
+      placeholder WXT est parti), `favicon.{ico,svg}` + `apple-touch-icon.png` servis par
+      `app/api/brand.py` sur trois routes publiques hors schéma, `BrandMark` dans le header de
+      la popup, lockup et couleurs de marque sur `/extension`, logos en tête des README,
+      `docs/{fr,en}/modules/marque.md`. Reste à faire **à la main** : uploader
+      `assets/social-preview.png` dans *Settings → General → Social preview* du dépôt GitHub —
+      aucun fichier du dépôt ne pilote cet aperçu. 162 tests pytest. 2026-08-22.
 
 ## Décisions récentes (2026-08-21)
 
@@ -319,3 +330,10 @@ compose (`COMPOSE_PROFILES=autoupdate`, scope `ez-dl`) ; alternative build local
 - **Assets vidéo externes piégeux pour les e2e** : `commondatastorage.googleapis.com` refuse les
   UA non-navigateur (403 pour yt-dlp/curl), `media.w3.org` 403 par intermittence quand yt-dlp
   envoie un `Referer` étranger. Servir la vidéo de test en local (`python3 -m http.server`).
+- **Icône d'extension : le 16 px décide du dessin** (`ez-dl-n4d`). Deux versions ont été
+  rejetées à cette taille avant la bonne : un chevron *tracé* se confond avec sa hampe et se lit
+  « W » puis « croix », parce qu'une pointe et une hampe ne tiennent pas dans ~6 rangées de
+  pixels. D'où une flèche **pleine** (hampe en rect arrondi + triangle) et un bac tracé, plus une
+  variante hintée `assets/icon-small.svg` (trait 3u, bords sur des pixels entiers) réservée aux
+  rendus 16 et 32 px. Ne jamais juger le dessin dans le SVG : rastériser et regarder à taille
+  réelle. Corollaire : `textLength` sur un lockup SVG étale le crénage — laisser la fonte gérer.
