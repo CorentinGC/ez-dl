@@ -168,6 +168,18 @@ open folder's. No segment ever points above an allowed root — the server would
 Files are never shown: `/api/folders` returns every entry, `listSubfolders` keeps only `is_dir` —
 a download destination is always a directory.
 
+#### Update banner
+
+On open, the popup queries `GET /extension/version` on the active profile's server (public route,
+outside `/api`) and compares the published version with the installed manifest's
+(`isNewerVersion`, `src/lib/version.ts`: numeric segments, no full semver — Chrome only allows 1
+to 4 integers). A banner appears only if the published version is **strictly** greater; it opens
+the server's install page in a tab.
+
+Every other case is **silent**: missing route (`404` on an older server), image built without the
+artifact (`available: false`), unreachable server, unparseable version. The extension works in all
+of them, so there is nothing to report to the user.
+
 ## API contract
 
 All routes are prefixed with `/api`. Authentication required (`Authorization: Bearer

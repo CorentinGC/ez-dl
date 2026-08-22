@@ -24,10 +24,14 @@ import type {
   JobResumeRequest,
   ProbeRequestBody,
   ProbeResponse,
+  PublishedExtension,
   SiteRule,
 } from './types';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** La vérification de mise à jour est accessoire : elle ne doit pas retarder l'ouverture de la popup. */
+const UPDATE_CHECK_TIMEOUT_MS = 4_000;
 
 /** Erreur de base pour toutes les erreurs d'API typées. */
 export class ApiError extends Error {
@@ -216,6 +220,14 @@ export function createApiClient(config: ApiClientConfig) {
     getHealth: () => request<HealthResponse>(config, '/api/health'),
 
     getCapabilities: () => request<CapabilitiesResponse>(config, '/api/capabilities'),
+
+    /**
+     * Version de l'extension publiée par le serveur — route **publique**, hors `/api` (le Bearer
+     * envoyé quand même est sans effet). Un serveur antérieur à cette fonctionnalité répond `404`
+     * (`ServerError`) : l'appelant traite l'échec en silence.
+     */
+    getPublishedExtension: () =>
+      request<PublishedExtension>({ ...config, timeoutMs: UPDATE_CHECK_TIMEOUT_MS }, '/extension/version'),
 
     /** Sonde une URL sans contexte d'authentification (page publique). */
     probe: (url: string) => request<ProbeResponse>(config, `/api/probe?url=${encodeURIComponent(url)}`),

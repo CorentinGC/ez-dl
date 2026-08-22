@@ -18,6 +18,21 @@ export interface HealthResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Contrat serveur — GET /extension/version (publique, hors /api)
+// ---------------------------------------------------------------------------
+
+/**
+ * Artefact d'extension publié par le serveur. `available: false` (et champs `null`) si l'image a
+ * été construite sans artefact ; un serveur antérieur à cette fonctionnalité répond `404`.
+ */
+export interface PublishedExtension {
+  available: boolean;
+  version: string | null;
+  filename: string | null;
+  size: number | null;
+}
+
+// ---------------------------------------------------------------------------
 // Contrat serveur — GET /api/capabilities
 // ---------------------------------------------------------------------------
 

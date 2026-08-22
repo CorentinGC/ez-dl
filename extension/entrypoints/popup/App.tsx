@@ -10,8 +10,10 @@ import { Header, type PopupView } from './components/Header';
 import { JobsView } from './components/JobsView';
 import { ProfileSelect } from './components/ProfileSelect';
 import { SourcesView } from './components/SourcesView';
+import { UpdateBanner } from './components/UpdateBanner';
 import { useCapabilities } from '@/src/hooks/useCapabilities';
 import { useActiveTab } from './hooks/useActiveTab';
+import { useExtensionUpdate } from './hooks/useExtensionUpdate';
 import { useJobs } from './hooks/useJobs';
 import { useSettings } from './hooks/useSettings';
 import { useSources } from './hooks/useSources';
@@ -25,6 +27,7 @@ export default function App() {
   const { presets } = useCapabilities(activeSettings);
   const { jobs, connectionMode, actionError, cancelJob, pauseJob, resumeJob } = useJobs(activeSettings);
   const sourcesState = useSources(activeSettings, tab);
+  const update = useExtensionUpdate(activeSettings);
   const apiClient = useMemo(() => (settings ? createApiClient(toApiConfig(settings)) : null), [settings]);
 
   if (settingsLoading || tabLoading) {
@@ -60,6 +63,7 @@ export default function App() {
         activeProfileId={activeProfileId}
         onSelectProfile={(id) => void selectProfile(id)}
       />
+      <UpdateBanner update={update} />
       <main className="popup-main">
         {view === 'sources' ? (
           tab && apiClient ? (

@@ -14,7 +14,7 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
   destination `/etc` refusée en 400, démarrage normal (génération auto du mot de passe si absent).
 - **Extension** : sniffer `background.ts`, popup (sources, qualité, renommage, dossier, preset,
   jobs en SSE + pause/reprise/retry, sélecteur de serveur), options (profils multi-serveurs),
-  content script picker. `compile` OK, **152 tests Vitest** verts.
+  content script picker. `compile` OK, **160 tests Vitest** verts.
   Manifest MV3 : `webRequest, storage, tabs, activeTab, cookies, scripting` + `<all_urls>`.
 - **Infra** : Dockerfile multi-stage non-root, `docker-compose.yml` (+ override GPU), CI GitHub
   Actions, Makefile. `docker compose config` validé.
@@ -84,6 +84,12 @@ Squelette complet et vérifié, commité localement sur `main` — **rien n'est 
       avec `ConfirmDialog` via `useModalFocus`), fil d'Ariane cliquable (`buildBreadcrumb`) à la
       place des items « racines » / « .. », police des items réduite, course de `open()` corrigée,
       réouverture du navigateur réparée. 152 tests Vitest. 2026-08-22.
+
+- [x] `ez-dl-aja` : bandeau de mise à jour dans la popup — `isNewerVersion` (`src/lib/version.ts`,
+      6 cas), `getPublishedExtension()` sur la route publique `/extension/version`, bandeau ouvrant
+      la page d'installation du serveur. Silence total sur 404 / `available:false` / réseau.
+      **La route serveur est livrée par un autre lot (session parallèle) — non testée en réel
+      tant qu'elle n'est pas déployée.** 160 tests Vitest. 2026-08-22.
 
 ## Décisions récentes (2026-08-21)
 

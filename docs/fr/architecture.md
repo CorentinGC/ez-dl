@@ -169,6 +169,18 @@ autorisée — le serveur répondrait `400`.
 Les fichiers ne sont jamais affichés : `/api/folders` renvoie toutes les entrées, `listSubfolders`
 ne garde que `is_dir` — une destination de téléchargement est toujours un dossier.
 
+#### Bandeau de mise à jour
+
+À l'ouverture, la popup interroge `GET /extension/version` sur le serveur du profil actif (route
+publique, hors `/api`) et compare la version publiée à celle du manifeste installé
+(`isNewerVersion`, `src/lib/version.ts` : segments numériques, pas de semver complet — Chrome
+n'autorise que 1 à 4 entiers). Un bandeau n'apparaît que si la version publiée est **strictement**
+supérieure ; il ouvre la page d'installation du serveur dans un onglet.
+
+Tous les autres cas sont **silencieux** : route absente (`404` sur un serveur antérieur), image
+construite sans artefact (`available: false`), serveur injoignable, version illisible. L'extension
+fonctionne dans tous ces cas, il n'y a rien à signaler à l'utilisateur.
+
 ## Contrat d'API
 
 Toutes les routes sont préfixées par `/api`. Authentification obligatoire (`Authorization: Bearer

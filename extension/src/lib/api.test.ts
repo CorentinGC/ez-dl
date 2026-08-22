@@ -239,3 +239,26 @@ describe('createApiClient().deleteJob', () => {
     expect((init.headers as Headers).get('Authorization')).toBe('Bearer secret');
   });
 });
+
+describe('createApiClient().getPublishedExtension', () => {
+  const config = { baseUrl: 'http://localhost:8000/', password: 'secret' };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('interroge la route publique /extension/version (hors /api, slash final normalisé)', async () => {
+    const body = { available: true, version: '0.1.0', filename: 'ez-dl-extension-0.1.0.crx', size: 1234 };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createApiClient(config).getPublishedExtension()).resolves.toEqual(body);
+    expect((fetchMock.mock.calls[0] as [string, RequestInit])[0]).toBe('http://localhost:8000/extension/version');
+  });
+
+  it('remonte une erreur sur un serveur sans la route (404) — l’appelant la traite en silence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })));
+
+    await expect(createApiClient(config).getPublishedExtension()).rejects.toThrow();
+  });
+});

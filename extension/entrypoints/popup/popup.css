@@ -164,6 +164,24 @@ select {
   background: var(--ez-bg-hover);
 }
 
+/* Bandeau de mise à jour : pleine largeur sous l'en-tête, discret mais cliquable en entier. */
+.popup-update-banner {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--ez-border);
+  background: var(--ez-accent);
+  color: var(--ez-accent-contrast);
+  padding: 7px 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.popup-update-banner:hover {
+  background: var(--ez-accent-hover);
+}
+
 .popup-main {
   padding: 12px;
   overflow-y: auto;
