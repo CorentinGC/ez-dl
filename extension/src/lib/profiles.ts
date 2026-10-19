@@ -148,6 +148,11 @@ export function isServerConfigured(settings: ExtensionSettings): boolean {
 // ---------------------------------------------------------------------------
 
 /** Bascule le profil actif. Un identifiant inconnu est ignoré (aucune écriture). */
+/** Remplace tous les profils (import d'une sauvegarde) ; le contenu est normalisé avant écriture. */
+export async function replaceSettingsRoot(root: unknown): Promise<SettingsRoot> {
+  return writeRoot(normalizeRoot(root));
+}
+
 export async function setActiveProfile(id: string): Promise<SettingsRoot> {
   const root = await getSettingsRoot();
   if (!root.profiles.some((p) => p.id === id) || root.activeProfileId === id) return root;

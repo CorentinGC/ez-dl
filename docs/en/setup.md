@@ -215,6 +215,12 @@ carrying them server-side is `0600` and deleted when the job ends.
 To update later: replace the folder's contents with those of the new archive, then reload the
 extension from `chrome://extensions`.
 
+> **Do not remove the extension to update it.** Chrome deletes its settings (servers, password,
+> favorite folders) along with it, and an unpacked extension reloaded from another folder gets a
+> new ID, hence empty settings. Before any reinstall: **Settings → Settings backup → Export**,
+> then **Import** the file once the extension is reinstalled. The file contains passwords in
+> plain text.
+
 > **Drag-and-dropping the `.crx` does not work.** Chrome rejects any `.crx` dropped onto
 > `chrome://extensions` that is not signed by the Chrome Web Store, with "Package is invalid:
 > CRX_REQUIRED_PROOF_MISSING" — Developer mode changes nothing. No self-hosted server can produce

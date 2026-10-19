@@ -8,6 +8,7 @@ import { useMemo } from 'react';
 import { createApiClient, toApiConfig } from '@/src/lib/api';
 import { useCapabilities } from '@/src/hooks/useCapabilities';
 import { isServerConfigured } from '@/src/lib/storage';
+import { BackupSection } from './components/BackupSection';
 import { CookiesSection } from './components/CookiesSection';
 import { FoldersSection } from './components/FoldersSection';
 import { InterfaceSection } from './components/InterfaceSection';
@@ -58,6 +59,8 @@ export default function App() {
         <CookiesSection settings={selected} onUpdate={update} />
         <RulesSection apiClient={apiClient} />
       </div>
+
+      <BackupSection />
     </main>
   );
 }

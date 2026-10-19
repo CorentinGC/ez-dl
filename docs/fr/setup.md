@@ -218,6 +218,12 @@ et le fichier temporaire qui les porte côté serveur est en `0600` puis supprim
 Pour mettre à jour ensuite : remplacer le contenu du dossier par celui de la nouvelle archive,
 puis recharger l'extension depuis `chrome://extensions`.
 
+> **Ne pas supprimer l'extension pour la mettre à jour.** Chrome efface ses réglages (serveurs, mot
+> de passe, dossiers favoris) avec elle, et une extension non empaquetée rechargée depuis un autre
+> dossier reçoit un nouvel identifiant, donc des réglages vides. Avant toute réinstallation :
+> **Réglages → Sauvegarde des réglages → Exporter**, puis **Importer** le fichier une fois
+> l'extension réinstallée. Le fichier contient les mots de passe en clair.
+
 > **Le glisser-déposer du `.crx` ne fonctionne pas.** Chrome rejette tout `.crx` déposé sur
 > `chrome://extensions` qui n'est pas signé par le Chrome Web Store, avec « Package incorrect
 > CRX_REQUIRED_PROOF_MISSING » — le Mode développeur n'y change rien. Aucun serveur auto-hébergé
