@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass
+
+from app.core.process import run_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -220,33 +221,25 @@ def build_conversion_args(preset: Preset, input_path: str, output_path: str) -> 
     return ["-y", "-i", input_path, "-c:v", preset.encoder_name, "-c:a", "aac", output_path]
 
 
-async def detect_encoders(ffmpeg_binary: str) -> dict[str, Encoder]:
+async def detect_encoders(ffmpeg_binary: str, *, timeout: float = 15.0) -> dict[str, Encoder]:
     """Lance `ffmpeg -encoders` et retourne les encodeurs disponibles."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            ffmpeg_binary,
-            "-hide_banner",
-            "-encoders",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        _, stdout, _ = await run_bounded(
+            ffmpeg_binary, "-hide_banner", "-encoders", timeout=timeout
         )
-        stdout, _ = await proc.communicate()
     except FileNotFoundError:
         logger.warning("Binaire ffmpeg introuvable (%s), aucun encodeur détecté", ffmpeg_binary)
+        return {}
+    except TimeoutError:
+        logger.warning("Détection des encodeurs ffmpeg expirée (%s)", ffmpeg_binary)
         return {}
     return parse_encoders(stdout.decode("utf-8", errors="replace"))
 
 
-async def is_available(ffmpeg_binary: str) -> bool:
+async def is_available(ffmpeg_binary: str, *, timeout: float = 15.0) -> bool:
     """Vérifie que le binaire ffmpeg est exécutable."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            ffmpeg_binary,
-            "-version",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.communicate()
-    except FileNotFoundError:
+        returncode, _, _ = await run_bounded(ffmpeg_binary, "-version", timeout=timeout)
+    except (FileNotFoundError, TimeoutError):
         return False
-    return proc.returncode == 0
+    return returncode == 0

@@ -52,7 +52,7 @@ def _stub_external_binaries(monkeypatch) -> None:
     async def _fake_version(binary: str) -> str:
         return "2024.01.01"
 
-    async def _fake_update(binary: str, *, timeout: float = 120.0) -> str:
+    async def _fake_update(binary: str, **_kwargs: object) -> str:
         return ""
 
     monkeypatch.setattr(ffmpeg_module, "detect_encoders", _fake_detect_encoders)

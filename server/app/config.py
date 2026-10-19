@@ -7,8 +7,9 @@ import secrets
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, PrivateAttr, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version applicative — source de vérité unique : `[project].version` de pyproject.toml.
@@ -96,10 +97,41 @@ def _origin_to_regex(pattern: str) -> str:
     return f"^{escaped}$"
 
 
+_PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
+
+
+def validate_proxy_url(value: str) -> str:
+    """Valide une URL de proxy : vide (direct) ou `http|https|socks5|socks5h://[user:pass@]hôte`.
+
+    Les messages d'erreur n'embarquent jamais la valeur : elle peut contenir des identifiants.
+    """
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        parts = urlsplit(value)
+        has_host = bool(parts.hostname)
+    except ValueError:
+        parts, has_host = None, False
+    if parts is None or parts.scheme not in _PROXY_SCHEMES or not has_host:
+        raise ValueError(
+            "EZDL_PROXY invalide : attendu <http|https|socks5|socks5h>://[user:pass@]hôte[:port]."
+        )
+    return value
+
+
+def proxy_label(proxy: str) -> str:
+    """Forme loggable d'un proxy (`schéma://hôte`), sans identifiants ni port."""
+    parts = urlsplit(proxy)
+    return f"{parts.scheme}://{parts.hostname}"
+
+
 class Settings(BaseSettings):
     """Paramètres de l'application, tous surchargeables via l'environnement `EZDL_*`."""
 
-    model_config = SettingsConfigDict(env_prefix="EZDL_", extra="ignore")
+    # `hide_input_in_errors` : une erreur de validation ne recopie pas la valeur reçue
+    # (EZDL_PROXY et EZDL_PASSWORD peuvent contenir des secrets).
+    model_config = SettingsConfigDict(env_prefix="EZDL_", extra="ignore", hide_input_in_errors=True)
 
     password: str = ""
     # Positionné par `get_settings()` quand le mot de passe a été généré faute d'EZDL_PASSWORD ;
@@ -125,6 +157,11 @@ class Settings(BaseSettings):
     ffmpeg_binary: str = "ffmpeg"
     cors_origins: str = "chrome-extension://*"
     log_level: str = "info"
+    # Proxy de sortie pour yt-dlp (vide = connexion directe). Peut contenir des identifiants :
+    # ne jamais le logger tel quel (voir `proxy_label`).
+    proxy: str = ""
+    # Durée maximale d'un probe yt-dlp avant que son groupe de process ne soit tué.
+    probe_timeout_seconds: float = Field(default=25.0, gt=0)
 
     @model_validator(mode="after")
     def _normalize_password(self) -> Settings:
@@ -155,6 +192,12 @@ class Settings(BaseSettings):
             "En Docker, garder les valeurs par défaut : "
             "EZDL_DATA_DIR=/config et EZDL_TEMP_DIR=/tmp/ez-dl."
         )
+
+    @field_validator("proxy")
+    @classmethod
+    def _validate_proxy(cls, value: str) -> str:
+        """Refuse un proxy mal formé au démarrage (sans recopier la valeur dans l'erreur)."""
+        return validate_proxy_url(value)
 
     @field_validator("public_url")
     @classmethod

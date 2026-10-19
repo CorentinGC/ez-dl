@@ -25,6 +25,13 @@ services:
     container_name: ez-dl
     restart: unless-stopped
 
+    # Garde-fous contre les process yt-dlp/ffmpeg fantômes : `init` fait de tini le PID 1
+    # (récolte des orphelins), `mem_limit` et `pids_limit` bornent les dégâts d'une
+    # extraction qui s'emballe plutôt que de laisser l'OOM-killer choisir pour tout l'hôte.
+    init: true
+    mem_limit: ${EZDL_MEM_LIMIT:-4g}
+    pids_limit: 512
+
     # Opt-in du service `watchtower` ci-dessous : seuls les conteneurs portant ces labels
     # (et ce scope) sont mis à jour — les autres stacks de l'hôte ne sont jamais touchées.
     labels:
@@ -52,6 +59,10 @@ services:
       EZDL_TEMP_DIR: /tmp/ez-dl
       EZDL_MAX_CONCURRENT_JOBS: ${EZDL_MAX_CONCURRENT_JOBS:-2}
       EZDL_LOG_LEVEL: ${EZDL_LOG_LEVEL:-info}
+      # Proxy sortant pour yt-dlp (vide = connexion directe). Jamais loggé.
+      EZDL_PROXY: ${EZDL_PROXY:-}
+      # Durée maximale (secondes) d'une analyse d'URL avant que yt-dlp ne soit tué.
+      EZDL_PROBE_TIMEOUT_SECONDS: ${EZDL_PROBE_TIMEOUT_SECONDS:-25}
 
     ports:
       - "${EZDL_PORT:-8000}:8000"

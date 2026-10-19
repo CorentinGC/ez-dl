@@ -42,8 +42,35 @@ def _validate_format_id(value: str) -> str:
     return value
 
 
+def _validate_header_name(value: str) -> str:
+    """Un nom de header ne peut pas contenir `:` : yt-dlp sépare `clé:valeur` sur le premier."""
+    if ":" in value:
+        raise ValueError("Nom de header invalide : « : » interdit.")
+    return _reject_control_chars(value)
+
+
+# Un nom de domaine DNS : labels alphanumériques (tirets internes), au moins un point.
+_HOSTNAME = re.compile(
+    r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$", re.I
+)
+
+
+def _validate_domain(value: str) -> str:
+    """Refuse tout ce qui n'est pas un nom d'hôte (schéma, chemin, port, espaces...)."""
+    if not _HOSTNAME.fullmatch(value):
+        raise ValueError("Domaine invalide : nom d'hôte attendu (ex. example.com).")
+    return value
+
+
 MediaUrl = Annotated[str, AfterValidator(_validate_media_url)]
 CookieField = Annotated[str, AfterValidator(_reject_control_chars)]
+RefererField = Annotated[str, Field(max_length=2048), AfterValidator(_reject_control_chars)]
+HeaderName = Annotated[
+    str, Field(min_length=1, max_length=100), AfterValidator(_validate_header_name)
+]
+HeaderValue = Annotated[str, Field(max_length=4096), AfterValidator(_reject_control_chars)]
+HeadersField = Annotated[dict[HeaderName, HeaderValue], Field(max_length=50)]
+DomainField = Annotated[str, Field(max_length=253), AfterValidator(_validate_domain)]
 FormatId = Annotated[str, Field(max_length=100), AfterValidator(_validate_format_id)]
 
 
@@ -66,8 +93,11 @@ class ProbeRequest(BaseModel):
 
     url: MediaUrl
     cookies: list[CookieItem] | None = None
-    headers: dict[str, str] | None = None
-    referer: str | None = None
+    headers: HeadersField | None = None
+    referer: RefererField | None = None
+    #: Rang (1-based) de la vidéo voulue quand l'URL en porte plusieurs (tweet multi-vidéos).
+    #: Absent : seule la première entrée est considérée, jamais toute une playlist.
+    playlist_items: int | None = Field(default=None, ge=1, le=50)
 
 
 class FormatOut(BaseModel):
@@ -126,6 +156,8 @@ class CapabilitiesResponse(BaseModel):
 
     encoders: list[EncoderOut]
     presets: list[PresetOut]
+    #: Un proxy sortant est configuré (l'URL elle-même n'est jamais exposée).
+    proxy_enabled: bool = False
 
 
 class HealthResponse(BaseModel):
@@ -217,9 +249,12 @@ class JobCreate(BaseModel):
     filename: str | None = None
     preset_id: str | None = None
     cookies: list[CookieItem] | None = None
-    headers: dict[str, str] | None = None
-    referer: str | None = None
+    headers: HeadersField | None = None
+    referer: RefererField | None = None
     title: str | None = None
+    #: Rang (1-based) de la vidéo voulue quand l'URL en porte plusieurs (tweet multi-vidéos).
+    #: Absent : seule la première entrée est considérée, jamais toute une playlist.
+    playlist_items: int | None = Field(default=None, ge=1, le=50)
 
 
 class JobResume(BaseModel):
@@ -231,8 +266,8 @@ class JobResume(BaseModel):
     """
 
     cookies: list[CookieItem] | None = None
-    headers: dict[str, str] | None = None
-    referer: str | None = None
+    headers: HeadersField | None = None
+    referer: RefererField | None = None
 
 
 class JobOut(BaseModel):
@@ -279,8 +314,8 @@ class JobCreateResponse(BaseModel):
 class RuleCreate(BaseModel):
     """Corps de `POST /api/rules`."""
 
-    domain: str
-    url_pattern: str
+    domain: DomainField
+    url_pattern: str = Field(max_length=500)
     label: str | None = None
     notes: str | None = None
     source: RuleSource = RuleSource.MANUAL

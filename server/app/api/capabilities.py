@@ -17,6 +17,7 @@ async def get_capabilities(request: Request) -> CapabilitiesResponse:
     encoders = request.app.state.encoders
     presets = available_presets(encoders)
     return CapabilitiesResponse(
+        proxy_enabled=bool(request.app.state.settings.proxy),
         encoders=[
             EncoderOut(id=e.id, name=e.name, hwaccel=e.hwaccel, codec=e.codec)
             for e in relevant_encoders(encoders)

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import sanitize_filename
+from app.core.process import run_bounded, spawn
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,23 @@ class YtDlpError(RuntimeError):
     """Erreur lors d'un appel yt-dlp (probe, téléchargement)."""
 
 
+class YtDlpListingError(YtDlpError):
+    """L'URL désigne une page de liste (recherche, chaîne, playlist), pas une vidéo."""
+
+
 def _context_args(
-    cookies_file: Path | None, headers: dict[str, str] | None, referer: str | None
+    cookies_file: Path | None,
+    headers: dict[str, str] | None,
+    referer: str | None,
+    proxy: str = "",
 ) -> list[str]:
-    """Construit les arguments communs (cookies, headers, referer) d'un appel yt-dlp."""
+    """Construit les arguments communs (proxy, cookies, headers, referer) d'un appel yt-dlp.
+
+    L'URL du proxy peut contenir des identifiants : elle n'est jamais loggée.
+    """
     args: list[str] = []
+    if proxy:
+        args += ["--proxy", proxy]
     if cookies_file is not None:
         args += ["--cookies", str(cookies_file)]
     if referer:
@@ -146,6 +159,30 @@ def suggested_filename(info: dict[str, Any]) -> str:
     return sanitize_filename(f"{title}.{ext}")
 
 
+def _playlist_args(playlist_items: int | None, *, is_probe: bool) -> list[str]:
+    """Règle playlist unique : jamais toute une liste, au plus l'entrée demandée.
+
+    Sans rang explicite, le probe n'extrait qu'une entrée à plat (`--flat-playlist`) : une
+    page de liste est ainsi détectée sans extraire chaque vidéo en RAM. Avec un rang, on
+    veut l'entrée complète (formats inclus), donc pas de `--flat-playlist`.
+    """
+    args = ["--no-playlist", "--playlist-items", str(playlist_items or 1)]
+    if is_probe and playlist_items is None:
+        args.append("--flat-playlist")
+    return args
+
+
+def _unwrap_playlist(info: dict[str, Any], playlist_items: int | None) -> dict[str, Any]:
+    """Retourne l'info de la vidéo visée : lève `YtDlpListingError` pour une liste non
+    ciblée, déroule `entries[0]` quand un rang explicite a été demandé."""
+    if info.get("_type") not in ("playlist", "multi_video"):
+        return info
+    entry = next((e for e in info.get("entries") or [] if e), None)
+    if playlist_items is None or entry is None:
+        raise YtDlpListingError("Page de liste (recherche, chaîne, playlist) : ouvrez une vidéo.")
+    return entry
+
+
 async def probe(
     url: str,
     *,
@@ -153,7 +190,9 @@ async def probe(
     cookies_file: Path | None = None,
     headers: dict[str, str] | None = None,
     referer: str | None = None,
-    timeout: float = 60.0,
+    proxy: str = "",
+    playlist_items: int | None = None,
+    timeout: float = 25.0,
 ) -> dict[str, Any]:
     """Interroge yt-dlp (`-J`) pour une URL et retourne le JSON d'info normalisé
     (`formats`, `best_format_id`, `suggested_filename` inclus)."""
@@ -167,23 +206,23 @@ async def probe(
         "-J",
         "--no-warnings",
         "--ignore-no-formats-error",
-        *_context_args(cookies_file, headers, referer),
+        *_playlist_args(playlist_items, is_probe=True),
+        *_context_args(cookies_file, headers, referer, proxy),
         "--",
         url,
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        returncode, stdout, stderr = await run_bounded(*args, timeout=timeout)
+        if returncode != 0:
+            raise YtDlpError(f"yt-dlp a échoué : {_last_line(stderr)}")
+        raw_info: dict[str, Any] = json.loads(stdout.decode("utf-8", errors="replace"))
     except FileNotFoundError as exc:
         raise YtDlpError(f"Binaire yt-dlp introuvable : {binary}") from exc
     except TimeoutError as exc:
-        proc.kill()
         raise YtDlpError("Timeout lors de l'analyse de l'URL") from exc
-    if proc.returncode != 0:
-        raise YtDlpError(f"yt-dlp a échoué : {_last_line(stderr)}")
-    info: dict[str, Any] = json.loads(stdout.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        raise YtDlpError("Réponse yt-dlp illisible (JSON invalide)") from exc
+    info = _unwrap_playlist(raw_info, playlist_items)
     formats, best_format_id = normalize_formats(info)
     if not formats:
         raise YtDlpError(
@@ -221,6 +260,8 @@ async def start_download(
     cookies_file: Path | None = None,
     headers: dict[str, str] | None = None,
     referer: str | None = None,
+    proxy: str = "",
+    playlist_items: int | None = None,
 ) -> asyncio.subprocess.Process:
     """Démarre le téléchargement en subprocess et retourne le process (suivi/annulation).
 
@@ -243,23 +284,19 @@ async def start_download(
         PROGRESS_TEMPLATE,
         "-o",
         str(output_template),
+        *_playlist_args(playlist_items, is_probe=False),
     ]
     # Sans `format_id` (sources sniffées : la qualité est dans l'URL), pas de `-f` du tout :
     # yt-dlp applique son propre défaut.
     if format_id:
         args += ["-f", build_format_selector(format_id)]
-    args += _context_args(cookies_file, headers, referer)
+    args += _context_args(cookies_file, headers, referer, proxy)
     # Voir `probe` : `--` empêche qu'une URL en `-...` soit interprétée comme une option.
     args += ["--", url]
     # `start_new_session=True` : yt-dlp standalone est un binaire PyInstaller (bootloader +
     # process enfant). Sans groupe de process dédié, un SIGKILL sur le bootloader laisse
-    # l'enfant télécharger dans le vide. Voir `_stop_process_group` côté queue.
-    return await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
+    # l'enfant télécharger dans le vide. `spawn` crée ce groupe (voir `core.process`).
+    return await spawn(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
 
 async def stream_progress(
@@ -315,30 +352,25 @@ def _last_line(raw: bytes) -> str:
     return (errors or lines)[-1][:_MAX_ERROR_LENGTH]
 
 
-async def update(binary: str = "yt-dlp", *, timeout: float = 120.0) -> str:
+async def update(binary: str = "yt-dlp", *, proxy: str = "", timeout: float = 300.0) -> str:
     """Lance `yt-dlp -U`. Ne lève jamais : un échec est loggé en warning (non fatal)."""
+    args = [binary, *_context_args(None, None, None, proxy), "-U"]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            binary, "-U", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        returncode, stdout, stderr = await run_bounded(*args, timeout=timeout)
     except (FileNotFoundError, TimeoutError) as exc:
-        logger.warning("Auto-update yt-dlp impossible : %s", exc)
+        logger.warning("Auto-update yt-dlp impossible : %s", type(exc).__name__)
         return ""
-    if proc.returncode != 0:
+    if returncode != 0:
         logger.warning("yt-dlp -U a échoué : %s", _last_line(stderr))
     return stdout.decode("utf-8", errors="replace").strip()
 
 
-async def version(binary: str = "yt-dlp") -> str | None:
-    """Retourne la version de yt-dlp (`--version`), `None` si le binaire est introuvable."""
+async def version(binary: str = "yt-dlp", *, timeout: float = 15.0) -> str | None:
+    """Retourne la version de yt-dlp (`--version`), `None` si introuvable ou bloqué."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            binary, "--version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await proc.communicate()
-    except FileNotFoundError:
+        returncode, stdout, _ = await run_bounded(binary, "--version", timeout=timeout)
+    except (FileNotFoundError, TimeoutError):
         return None
-    if proc.returncode != 0:
+    if returncode != 0:
         return None
     return stdout.decode("utf-8", errors="replace").strip()

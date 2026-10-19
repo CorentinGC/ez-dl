@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import brand, capabilities, extension, folders, health, jobs, probe, rules
-from app.config import APP_VERSION, Settings, conflicting_roots, get_settings
+from app.config import APP_VERSION, Settings, conflicting_roots, get_settings, proxy_label
 from app.core import ffmpeg, ytdlp
 from app.core.paths import PathSecurityError, unavailable_roots
 from app.core.queue import JobQueue
@@ -52,14 +52,14 @@ def _configure_logging(level: str) -> None:
     )
 
 
-async def _periodic_ytdlp_update(binary: str, interval_hours: int) -> None:
+async def _periodic_ytdlp_update(binary: str, interval_hours: int, proxy: str = "") -> None:
     """Boucle d'auto-update périodique de yt-dlp (désactivée si `interval_hours == 0`)."""
     if interval_hours <= 0:
         return
     while True:
         await asyncio.sleep(interval_hours * 3600)
         before = await ytdlp.version(binary)
-        await ytdlp.update(binary)
+        await ytdlp.update(binary, proxy=proxy)
         after = await ytdlp.version(binary)
         logger.info("Auto-update yt-dlp périodique : %s -> %s", before, after)
 
@@ -72,6 +72,20 @@ def _warn_unavailable_roots(settings: Settings) -> None:
     """
     for _root, issue in unavailable_roots(settings.roots):
         logger.warning("Racine de téléchargement inutilisable : %s.", issue)
+
+
+def _log_proxy(settings: Settings) -> None:
+    """Journalise le proxy actif (schéma + hôte seulement : l'URL peut porter des identifiants)
+    et avertit sur `socks5://`, dont le DNS est résolu localement (fuite du résolveur)."""
+    if not settings.proxy:
+        return
+    label = proxy_label(settings.proxy)
+    logger.info("Proxy sortant yt-dlp actif : %s", label)
+    if settings.proxy.startswith("socks5://"):
+        logger.warning(
+            "Proxy %s : le DNS est résolu localement ; préférer socks5h:// (DNS via le proxy).",
+            label,
+        )
 
 
 def _reject_roots_over_server_state(settings: Settings) -> None:
@@ -95,6 +109,7 @@ async def _bootstrap_state(app: FastAPI, settings: Settings) -> JobQueue:
     engine = get_engine(settings)
     init_db(settings)
     _warn_unavailable_roots(settings)
+    _log_proxy(settings)
 
     encoders = await ffmpeg.detect_encoders(settings.ffmpeg_binary)
     # On ne journalise que les encodeurs utiles : `ffmpeg -encoders` en liste ~200.
@@ -131,9 +146,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     job_queue = await _bootstrap_state(app, settings)
 
     # Auto-update non bloquant au démarrage, puis boucle périodique.
-    update_task = asyncio.create_task(ytdlp.update(settings.ytdlp_binary))
+    update_task = asyncio.create_task(ytdlp.update(settings.ytdlp_binary, proxy=settings.proxy))
     periodic_task = asyncio.create_task(
-        _periodic_ytdlp_update(settings.ytdlp_binary, settings.ytdlp_update_interval_hours)
+        _periodic_ytdlp_update(
+            settings.ytdlp_binary, settings.ytdlp_update_interval_hours, settings.proxy
+        )
     )
 
     try:
