@@ -14,6 +14,19 @@ from app.security import require_auth
 
 router = APIRouter(tags=["probe"], dependencies=[Depends(require_auth)])
 
+#: Seules clés du JSON yt-dlp lues par la réponse : le cache n'en garde pas plus (le `-J`
+#: complet, sous-titres et vignettes compris, pèse souvent plusieurs centaines de Ko).
+_RESPONSE_KEYS = (
+    "title",
+    "uploader",
+    "duration",
+    "thumbnail",
+    "extractor",
+    "formats",
+    "best_format_id",
+    "suggested_filename",
+)
+
 # Code non standard (convention nginx) : le client a fermé la connexion avant la réponse.
 _CLIENT_CLOSED_REQUEST = 499
 
@@ -30,7 +43,7 @@ async def _do_probe(
     async def run_probe() -> dict:
         # Le cookie-jar vit dans la tâche partagée : elle peut survivre au premier demandeur.
         with cookie_jar_file(cookies, settings.temp_dir) as cookies_file:
-            return await ytdlp.probe(
+            info = await ytdlp.probe(
                 url,
                 binary=settings.ytdlp_binary,
                 cookies_file=cookies_file,
@@ -40,6 +53,7 @@ async def _do_probe(
                 playlist_items=playlist_items,
                 timeout=settings.probe_timeout_seconds,
             )
+        return {key: info.get(key) for key in _RESPONSE_KEYS}
 
     key = probe_key(
         url,

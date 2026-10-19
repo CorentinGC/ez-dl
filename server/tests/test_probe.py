@@ -14,7 +14,7 @@ from pydantic import ValidationError
 import app.core.ytdlp as ytdlp
 from app.config import Settings
 from app.core.probe_cache import ClientDisconnectedError, ProbeCoordinator, coordinator
-from app.core.process import run_bounded
+from app.core.process import redact_credentials, run_bounded
 from app.schemas import ProbeRequest, RuleCreate
 from tests.conftest import _stub_external_binaries
 
@@ -225,7 +225,18 @@ def test_proxy_setting_accepts_valid(value, base_env) -> None:
 
 
 @pytest.mark.parametrize(
-    "value", ["gluetun:8888", "ftp://host", "http://", "socks4://h", "http://user:secret@"]
+    "value",
+    [
+        "gluetun:8888",
+        "ftp://host",
+        "http://",
+        "socks4://h",
+        "http://user:secret@",
+        "http://user:secret@127.0.0.1:abc",
+        "http://user:secret@host:99999",
+        "http://user:sec ret@host:8888",
+        "http://user:secret@host:8888/\x00",
+    ],
 )
 def test_proxy_setting_rejects_invalid_without_leaking(value) -> None:
     with pytest.raises(ValidationError) as exc_info:
@@ -278,3 +289,34 @@ def test_rule_accepts_valid_domain_and_bounds_pattern() -> None:
     assert RuleCreate(domain="cdn.example.com", url_pattern="*.m3u8").domain == "cdn.example.com"
     with pytest.raises(ValidationError):
         RuleCreate(domain="example.com", url_pattern="a" * 501)
+
+
+def test_error_line_never_carries_proxy_credentials() -> None:
+    raw = b"ERROR: Failed to parse: http://user:secretpw@127.0.0.1:abc\n"
+    line = ytdlp.last_line(raw)
+    assert "secretpw" not in line
+    assert "http://***@127.0.0.1:abc" in line
+
+
+def test_redact_credentials_keeps_urls_without_userinfo() -> None:
+    assert redact_credentials("GET https://example.com/a@b") == "GET https://example.com/a@b"
+    assert redact_credentials("socks5h://u:p@h:1080 x") == "socks5h://***@h:1080 x"
+
+
+async def test_new_requester_does_not_join_a_cancelling_probe() -> None:
+    coord = ProbeCoordinator()
+    calls = 0
+
+    async def factory() -> dict:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.1)
+        return {"call": calls}
+
+    async def disconnected() -> bool:
+        return True
+
+    with pytest.raises(ClientDisconnectedError):
+        await coord.run("k", factory, disconnected)
+    # La première tâche est en cours d'annulation : le nouveau demandeur en relance une.
+    assert await coord.run("k", factory, _never_disconnected) == {"call": 2}

@@ -108,12 +108,17 @@ def validate_proxy_url(value: str) -> str:
     value = value.strip()
     if not value:
         return ""
+    has_forbidden_char = any(
+        char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in value
+    )
     try:
         parts = urlsplit(value)
-        has_host = bool(parts.hostname)
+        # `.port` lève sur un port non numérique ou hors bornes : sinon yt-dlp échoue en
+        # recopiant l'URL complète (identifiants compris) dans son message d'erreur.
+        has_host = bool(parts.hostname) and (parts.port is None or parts.port > 0)
     except ValueError:
         parts, has_host = None, False
-    if parts is None or parts.scheme not in _PROXY_SCHEMES or not has_host:
+    if has_forbidden_char or parts is None or parts.scheme not in _PROXY_SCHEMES or not has_host:
         raise ValueError(
             "EZDL_PROXY invalide : attendu <http|https|socks5|socks5h>://[user:pass@]hôte[:port]."
         )

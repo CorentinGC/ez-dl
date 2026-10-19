@@ -21,6 +21,8 @@ dist/
 # ── Environment ──────────────────────────────────────────────────────────────
 .env
 .env.local
+# Identifiants VPN (conteneur gluetun, voir docs/fr/setup.md)
+.vpn.env
 
 # ── MCP runtime ──────────────────────────────────────────────────────────────
 .mcp/chrome-devtools/

@@ -12,6 +12,7 @@ import errno
 import os
 import re
 import shutil
+import tempfile
 from collections.abc import Container
 from pathlib import Path
 
@@ -109,9 +110,14 @@ def atomic_move(source: Path, destination: Path) -> None:
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
-    temp_copy = destination.with_name(f".{destination.name}.ezdl-tmp")
+    # `mkstemp` (O_EXCL, nom aléatoire) et non un nom prévisible : un lien symbolique posé à
+    # l'avance dans un partage multi-utilisateurs ne peut pas rediriger l'écriture.
+    fd, temp_name = tempfile.mkstemp(dir=destination.parent, prefix=".ezdl-", suffix=".tmp")
+    temp_copy = Path(temp_name)
     try:
-        shutil.copy2(source, temp_copy)
+        with os.fdopen(fd, "wb") as target, source.open("rb") as origin:
+            shutil.copyfileobj(origin, target)
+        shutil.copystat(source, temp_copy)
         os.replace(temp_copy, destination)
     except BaseException:
         temp_copy.unlink(missing_ok=True)

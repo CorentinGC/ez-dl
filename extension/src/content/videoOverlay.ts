@@ -57,7 +57,8 @@ export function mountVideoOverlay(): void {
   const host = document.createElement('div');
   applyHostPositioning(host, false);
 
-  const shadow = host.attachShadow({ mode: 'open' });
+  // `closed` : un script de la page ne peut pas atteindre les boutons via `host.shadowRoot`.
+  const shadow = host.attachShadow({ mode: 'closed' });
   shadow.appendChild(buildOverlayStyle());
   const toast = buildToast();
   shadow.appendChild(toast);
@@ -202,6 +203,8 @@ function createBadge(video: HTMLVideoElement): Badge {
     (event) => {
       event.preventDefault();
       event.stopPropagation();
+      // Un clic synthétique (`button.click()` d'un script de la page) ne déclenche jamais de job.
+      if (!event.isTrusted) return;
       void submitQuickDownload(video);
     },
     true,

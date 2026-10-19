@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.paths import sanitize_filename
-from app.core.process import run_bounded, spawn
+from app.core.process import redact_credentials, run_bounded, spawn
 
 logger = logging.getLogger(__name__)
 
@@ -340,7 +340,7 @@ def last_line(raw: bytes) -> str:
     if not lines:
         return "erreur inconnue"
     errors = [line for line in lines if line.lstrip().startswith("ERROR:")]
-    return (errors or lines)[-1][:_MAX_ERROR_LENGTH]
+    return redact_credentials((errors or lines)[-1])[:_MAX_ERROR_LENGTH]
 
 
 async def update(binary: str = "yt-dlp", *, proxy: str = "", timeout: float = 300.0) -> str:

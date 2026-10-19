@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app.core import ffmpeg
-from app.core.process import kill_and_reap, spawn
+from app.core.process import kill_and_reap, redact_credentials, spawn
 
 # Options globales avant les arguments du preset : stdin jamais lu (un ffmpeg qui attendrait
 # une réponse bloquerait le job), pas de bannière, seules les erreurs sur stderr.
@@ -43,5 +43,5 @@ async def run_conversion(
         await kill_and_reap(process)
         raise
     if process.returncode != 0:
-        tail = stderr.decode("utf-8", errors="replace")[-_STDERR_TAIL_CHARS:]
+        tail = redact_credentials(stderr.decode("utf-8", errors="replace"))[-_STDERR_TAIL_CHARS:]
         raise RuntimeError(f"ffmpeg a échoué : {tail}")

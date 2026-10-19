@@ -8,8 +8,10 @@
 
 import { classifyUrl, collapseVariantPlaylists, groupQualityVariants } from './detection';
 import { buildDefaultFilename, sanitizeFilename } from './filename';
+import { isPrivateHostUrl } from './privateHost';
 import { isValidMediaId } from './twitterMedia';
 import type { ExtensionSettings, FavoriteFolder, MediaCandidate, MediaKind, ProbeFormat, ProbeResponse } from './types';
+
 
 /** Rang de préférence d'un flux sniffé : un manifeste porte toutes les qualités, pas un fichier. */
 const KIND_RANK: Record<MediaKind, number> = { hls: 0, dash: 1, mp4: 2, webm: 3, 'other-video': 4 };
@@ -85,7 +87,9 @@ function isValidPlaylistIndex(value: unknown): value is number {
 
 function isUsableMediaUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > MAX_MEDIA_URL_LENGTH) return false;
-  return value.startsWith('http://') || value.startsWith('https://');
+  if (!value.startsWith('http://') && !value.startsWith('https://')) return false;
+  // Le `src` vient d'une page potentiellement hostile : jamais de job vers le réseau local.
+  return !isPrivateHostUrl(value);
 }
 
 /**

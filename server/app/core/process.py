@@ -13,8 +13,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import signal
 from typing import Any
+
+#: `schéma://user:pass@` dans une sortie de process (URL de proxy recopiée par yt-dlp).
+_URL_CREDENTIALS = re.compile(r"([a-z][a-z0-9+.-]*://)[^@/\s]+@", re.IGNORECASE)
 
 #: Délai laissé à un groupe après SIGTERM avant l'escalade en SIGKILL.
 TERM_GRACE_SECONDS = 5.0
@@ -93,3 +97,9 @@ async def run_bounded(*args: str, timeout: float, **kwargs: Any) -> tuple[int, b
         await kill_and_reap(process)
         raise
     return process.returncode or 0, stdout, stderr
+
+
+def redact_credentials(text: str) -> str:
+    """Masque les identifiants d'URL (`scheme://user:pass@` -> `scheme://***@`) d'une sortie
+    de process avant qu'elle n'atteigne un log, la base ou l'API."""
+    return _URL_CREDENTIALS.sub(r"\1***@", text)

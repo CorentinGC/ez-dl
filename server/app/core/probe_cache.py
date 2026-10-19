@@ -100,12 +100,17 @@ class ProbeCoordinator:
             self._store(key, info)
             return info
         finally:
-            self._in_flight.pop(key, None)
+            # Ne retire que sa propre entrée : une tâche remplaçante a pu prendre la clé.
+            entry = self._in_flight.get(key)
+            if entry is not None and entry.task is asyncio.current_task():
+                del self._in_flight[key]
 
     def _join(self, key: str, factory: ProbeFactory) -> _InFlight:
         """Rejoint le probe en vol pour `key`, ou en démarre un."""
         entry = self._in_flight.get(key)
-        if entry is not None:
+        # Une tâche en cours d'annulation (son dernier demandeur vient de partir) n'est pas
+        # rejoignable : elle lèverait `CancelledError` chez le nouveau demandeur.
+        if entry is not None and not entry.task.cancelling():
             return entry
         task = asyncio.create_task(self._execute(key, factory))
         # Récupère l'exception d'une tâche que plus personne n'attend (pas de warning asyncio).

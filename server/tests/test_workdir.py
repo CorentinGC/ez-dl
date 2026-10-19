@@ -49,7 +49,9 @@ def test_cross_device_move_copies_through_a_hidden_temp_then_replaces(
 
     atomic_move(source, destination)
 
-    assert seen == [[".video.mkv.ezdl-tmp"]]  # jamais de fichier tronqué sous le nom final
+    # Jamais de fichier tronqué sous le nom final : un seul fichier, temporaire et caché.
+    assert len(seen) == 1 and len(seen[0]) == 1
+    assert seen[0][0].startswith(".ezdl-") and seen[0][0].endswith(".tmp")
     assert destination.read_bytes() == b"data"
     assert not source.exists()
     assert [p.name for p in destination.parent.iterdir()] == ["video.mkv"]
@@ -61,11 +63,11 @@ def test_failed_copy_leaves_no_temp_file_and_keeps_the_source(tmp_path, monkeypa
     destination = tmp_path / "dst" / "video.mkv"
     destination.parent.mkdir()
 
-    def broken_copy(src, dst):
-        Path(dst).write_bytes(b"tron")
+    def broken_copy(origin, target):
+        target.write(b"tron")
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr(shutil, "copy2", broken_copy)
+    monkeypatch.setattr(shutil, "copyfileobj", broken_copy)
 
     with pytest.raises(OSError):
         atomic_move(source, destination)
@@ -132,3 +134,19 @@ def test_final_name_takes_the_real_container_suffix(
     tmp_path, requested: str, produced: str, expected: str
 ) -> None:
     assert final_name(tmp_path / requested, tmp_path / produced) == tmp_path / expected
+
+
+def test_cross_device_copy_never_follows_a_planted_symlink(tmp_path, monkeypatch) -> None:
+    """Un lien posé à l'avance sous l'ancien nom temporaire prévisible n'est jamais suivi."""
+    _force_cross_device(monkeypatch)
+    source = _source(tmp_path)
+    victim = tmp_path / "victim.db"
+    victim.write_bytes(b"precious")
+    destination = tmp_path / "dst" / "video.mkv"
+    destination.parent.mkdir()
+    (destination.parent / ".video.mkv.ezdl-tmp").symlink_to(victim)
+
+    atomic_move(source, destination)
+
+    assert victim.read_bytes() == b"precious"
+    assert destination.read_bytes() == b"data"
