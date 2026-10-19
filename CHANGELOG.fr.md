@@ -21,6 +21,11 @@ processus de release, à réserver à qui suit le dépôt.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-19
+
+### Corrigé
+
+- **ci** : la release publie sa propre image et non celle du canal edge (ez-dl-894) (ede71d3)
 ## [0.1.2] - 2026-10-19
 
 ### Corrigé
@@ -58,7 +63,8 @@ Première version taguée. Tout ce qui suit existait déjà sur `main` ; cette v
 - Mise à jour automatique opt-in dans le stack Docker (watchtower, profil compose `autoupdate`) et
   voie alternative par cron hôte pour les images construites localement.
 
-[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.3
 [0.1.2]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.0

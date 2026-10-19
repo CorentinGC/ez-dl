@@ -20,6 +20,11 @@ process, use it only if you follow the repository.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-19
+
+### Fixed
+
+- **ci** : la release publie sa propre image et non celle du canal edge (ez-dl-894) (ede71d3)
 ## [0.1.2] - 2026-10-19
 
 ### Fixed
@@ -55,7 +60,8 @@ the project starts being published as versioned artifacts.
 - Opt-in auto-update inside the Docker stack (watchtower, `autoupdate` compose profile) and a host
   cron alternative for locally-built images.
 
-[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.3
 [0.1.2]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.0
