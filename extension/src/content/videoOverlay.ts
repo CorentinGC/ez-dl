@@ -12,6 +12,7 @@
  * débouche sur aucune source, le bouton passe en erreur.
  */
 
+import { readTweetContext } from './tweetContext';
 import { findVideoTitle } from './videoTitleDom';
 import type { QuickDownloadRequest, QuickDownloadResponse } from '@/src/lib/messaging';
 import { computeBadgePosition, isEligibleVideoSize, isRectVisible } from '@/src/lib/overlayGeometry';
@@ -223,12 +224,16 @@ async function submitQuickDownload(video: HTMLVideoElement): Promise<void> {
   const isForced = badge.state === 'duplicate' && Date.now() < badge.forceUntil;
   applyBadgeState(badge, 'sending');
   try {
+    const tweet = readTweetContext(video);
     const request: QuickDownloadRequest = {
       type: 'QUICK_DOWNLOAD',
       clicked: {
         mediaUrl: mediaUrlOf(video),
-        title: findVideoTitle(video),
+        title: tweet?.title ?? findVideoTitle(video),
         isOnlyVideo: document.querySelectorAll('video').length === 1,
+        mediaId: tweet?.mediaId,
+        pageUrl: tweet?.pageUrl,
+        playlistIndex: tweet?.playlistIndex,
       },
       force: isForced,
     };

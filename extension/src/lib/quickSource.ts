@@ -8,6 +8,7 @@
 
 import { classifyUrl, collapseVariantPlaylists, groupQualityVariants } from './detection';
 import { buildDefaultFilename, sanitizeFilename } from './filename';
+import { isValidMediaId } from './twitterMedia';
 import type { ExtensionSettings, FavoriteFolder, MediaCandidate, MediaKind, ProbeFormat, ProbeResponse } from './types';
 
 /** Rang de préférence d'un flux sniffé : un manifeste porte toutes les qualités, pas un fichier. */
@@ -20,6 +21,8 @@ export interface QuickJobSource {
   formatId: string | null;
   filename: string;
   title: string;
+  /** Rang de la vidéo voulue quand `url` désigne une page à plusieurs vidéos (tweet). */
+  playlistItems?: number;
 }
 
 /**
@@ -34,6 +37,12 @@ export interface ClickedVideo {
   title: string | null;
   /** Vrai si c'est la seule vidéo exploitable de la page : le probe couvre alors bien celle-ci. */
   isOnlyVideo: boolean;
+  /** Identifiant de média X/Twitter (poster) : relie la vidéo cliquée aux flux sniffés. */
+  mediaId?: string;
+  /** Permalink du tweet porteur de la vidéo. */
+  pageUrl?: string;
+  /** Rang (1-based) de la vidéo dans son tweet. */
+  playlistIndex?: number;
 }
 
 export interface QuickSourceInput {
@@ -48,6 +57,8 @@ export interface QuickSourceInput {
 }
 
 const MAX_MEDIA_URL_LENGTH = 2048;
+const TWEET_PERMALINK_PATTERN = /^https:\/\/(x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d{1,25}$/;
+const MAX_PLAYLIST_INDEX = 4;
 
 /**
  * Normalise ce que le content script rapporte de la vidéo cliquée. Une page hostile contrôle ces
@@ -57,12 +68,19 @@ const MAX_MEDIA_URL_LENGTH = 2048;
  */
 export function sanitizeClickedVideo(raw: unknown): ClickedVideo | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const { mediaUrl, title, isOnlyVideo } = raw as Record<string, unknown>;
+  const { mediaUrl, title, isOnlyVideo, mediaId, pageUrl, playlistIndex } = raw as Record<string, unknown>;
   return {
     mediaUrl: isUsableMediaUrl(mediaUrl) ? mediaUrl : null,
     title: typeof title === 'string' && title.trim().length > 0 ? title.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
     isOnlyVideo: isOnlyVideo === true,
+    ...(isValidMediaId(mediaId) ? { mediaId } : {}),
+    ...(typeof pageUrl === 'string' && TWEET_PERMALINK_PATTERN.test(pageUrl) ? { pageUrl } : {}),
+    ...(isValidPlaylistIndex(playlistIndex) ? { playlistIndex } : {}),
   };
+}
+
+function isValidPlaylistIndex(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_PLAYLIST_INDEX;
 }
 
 function isUsableMediaUrl(value: unknown): value is string {
@@ -121,10 +139,13 @@ function fromClickedMedia(mediaUrl: string, clickedTitle: string | null, pageTit
 /** Meilleur flux sniffé après regroupement des variantes de qualité, `null` si aucun. */
 export function pickBestCandidate(candidates: MediaCandidate[]): MediaCandidate | null {
   const grouped = groupQualityVariants(collapseVariantPlaylists(candidates));
-  const sorted = [...grouped].sort(
-    (a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.discoveredAt - b.discoveredAt,
-  );
+  const sorted = [...grouped].sort(compareCandidates);
   return sorted[0] ?? null;
+}
+
+/** Ordre de préférence entre deux flux : manifeste avant fichier, puis le plus ancien. */
+export function compareCandidates(a: MediaCandidate, b: MediaCandidate): number {
+  return KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.discoveredAt - b.discoveredAt;
 }
 
 /** Formats du probe, meilleure qualité d'abord (hauteur puis débit). */

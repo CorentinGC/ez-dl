@@ -16,10 +16,13 @@ import { readCookiesForUrl } from '@/src/lib/cookies';
 import { collapseVariantPlaylists, groupQualityVariants } from '@/src/lib/detection';
 import { isListingUrl } from '@/src/lib/listingUrl';
 import { hasMessageType, type GetTabStateRequest, type GetTabStateResponse } from '@/src/lib/messaging';
+import { labelTweetCandidates } from '@/src/lib/tweetSource';
+import { isTwitterUrl, normalizeStatusUrl, type TweetVideoInfo } from '@/src/lib/twitterMedia';
 import { EMPTY_TAB_STATE } from '@/src/lib/storage';
 import type { ExtensionSettings, PickedElementInfo, ProbeResponse } from '@/src/lib/types';
 import type { ActiveTabInfo } from './useActiveTab';
 import type { ProbeSource, Source } from '../types';
+import { requestTweetVideos } from './tweetVideos';
 
 export type SourcesError =
   | { kind: 'unauthorized' }
@@ -38,10 +41,13 @@ export interface UseSourcesResult {
 /** Verdict du probe : une réponse exploitable, ou « rien » (avec la raison éventuelle). */
 type ProbeOutcome = { probe: ProbeResponse | null; error: SourcesError | null };
 
+const NO_PROBE: ProbeOutcome = { probe: null, error: null };
+
 const NO_TAB_STATE: GetTabStateResponse = { ...EMPTY_TAB_STATE, tabId: -1 };
 
 export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInfo | null): UseSourcesResult {
   const [tabState, setTabState] = useState<GetTabStateResponse>(NO_TAB_STATE);
+  const [tweetVideos, setTweetVideos] = useState<TweetVideoInfo[]>([]);
   const [outcome, setOutcome] = useState<ProbeOutcome | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -59,6 +65,7 @@ export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInf
     // Le probe est fait par le serveur : changer de serveur invalide les sources affichées.
     setOutcome(null);
     setTabState(NO_TAB_STATE);
+    setTweetVideos([]);
     if (serverUrl === undefined || password === undefined || tabId === undefined || tabUrl === undefined) return;
 
     const controller = new AbortController();
@@ -69,7 +76,13 @@ export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInf
       const state = await requestTabState(tabId);
       if (controller.signal.aborted) return;
       setTabState(state);
-      const result = await resolveProbe({ serverUrl, password, sendCookies }, tabUrl, state, controller.signal);
+      const videos = await requestTweetVideos(tabId, tabUrl);
+      if (controller.signal.aborted) return;
+      setTweetVideos(videos);
+      // Flux sniffé reconnu pour une vidéo du DOM : il suffit, inutile de solliciter le serveur.
+      const result = hasLabelledCandidate(state, videos)
+        ? NO_PROBE
+        : await resolveProbe({ serverUrl, password, sendCookies }, tabUrl, state, controller.signal);
       if (controller.signal.aborted) return;
       setOutcome(result);
       isProbingRef.current = false;
@@ -89,8 +102,10 @@ export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInf
     const listener = (message: unknown) => {
       if (!hasMessageType(message, 'TAB_STATE_UPDATED')) return;
       if ((message as { tabId?: number }).tabId !== tabId) return;
-      void requestTabState(tabId).then((state) => {
-        if (isActive) setTabState(state);
+      void Promise.all([requestTabState(tabId), requestTweetVideos(tabId, tabUrl ?? '')]).then(([state, videos]) => {
+        if (!isActive) return;
+        setTabState(state);
+        setTweetVideos(videos);
       });
     };
     browser.runtime.onMessage.addListener(listener);
@@ -98,7 +113,7 @@ export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInf
       isActive = false;
       browser.runtime.onMessage.removeListener(listener);
     };
-  }, [tabId]);
+  }, [tabId, tabUrl]);
 
   const refresh = useCallback(() => {
     if (isProbingRef.current) return; // un probe est déjà en cours : ne pas en empiler un second
@@ -106,8 +121,8 @@ export function useSources(settings: ExtensionSettings | null, tab: ActiveTabInf
   }, []);
 
   const sources = useMemo(
-    () => (tab && outcome ? buildSources(outcome, tabState, tab) : []),
-    [outcome, tabState, tab],
+    () => (tab && outcome ? buildSources(outcome, tabState, tab, tweetVideos) : []),
+    [outcome, tabState, tab, tweetVideos],
   );
   const error = sources.length === 0 ? (outcome?.error ?? null) : null;
 
@@ -136,34 +151,59 @@ async function resolveProbe(
   const cached = tabState.quickProbe;
   if (cached && cached.url === url) return { probe: cached.probe, error: null };
 
+  // Page d'un tweet : on sonde le permalink canonique et seule sa 1re vidéo (un tweet
+  // multi-vidéos est une « playlist », refusée par le serveur sans `playlist_items`).
+  const permalink = isTwitterUrl(url) ? normalizeStatusUrl(url) : null;
+  const target = permalink ?? url;
+  const playlistItems = permalink ? 1 : undefined;
+
   try {
     const client = createApiClient(toApiConfig(settings));
     const probe = settings.sendCookies
-      ? await client.probeWithContext(url, { cookies: await readCookiesForUrl(url), referer: url }, { signal })
-      : await client.probe(url, { signal });
+      ? await client.probeWithContext(
+          target,
+          { cookies: await readCookiesForUrl(target), referer: url, playlist_items: playlistItems },
+          { signal },
+        )
+      : await client.probe(target, { signal, playlistItems });
     return { probe: probe.formats.length > 0 ? probe : null, error: null };
   } catch (err) {
     return { probe: null, error: classifyError(err) };
   }
 }
 
-function buildSources(outcome: ProbeOutcome, tabState: GetTabStateResponse, tab: ActiveTabInfo): Source[] {
+/** Un flux sniffé correspond-il à une vidéo du DOM (X/Twitter) ? Alors il est libellé et suffit. */
+function hasLabelledCandidate(tabState: GetTabStateResponse, videos: TweetVideoInfo[]): boolean {
+  return videos.length > 0 && labelTweetCandidates(tabState.candidates, videos).some((entry) => entry.isLabelled);
+}
+
+function buildSources(
+  outcome: ProbeOutcome,
+  tabState: GetTabStateResponse,
+  tab: ActiveTabInfo,
+  tweetVideos: TweetVideoInfo[],
+): Source[] {
   const sources: Source[] = [];
-  if (outcome.probe) sources.push(toProbeSource(outcome.probe, tab.url));
+  // Présentation : playlists variantes écrasées sous leur master, et déclinaisons de
+  // résolution d'un même flux progressif regroupées en une entrée avec choix de qualité.
+  const candidates = groupQualityVariants(collapseVariantPlaylists(tabState.candidates));
+  const labelled = labelTweetCandidates(candidates, tweetVideos);
+  // Sur X, un flux reconnu désigne une vidéo précise de la page : le probe (1re vidéo du tweet)
+  // ne ferait que doubler l'une d'elles, on ne garde que les flux libellés.
+  const hasTweetLabels = labelled.some((entry) => entry.isLabelled);
+
+  if (outcome.probe && !hasTweetLabels) sources.push(toProbeSource(outcome.probe, tab.url));
 
   // Flux réseau "non couverts" par le probe : on ne les ajoute que si aucun extracteur yt-dlp
   // n'a été trouvé (sinon, ce sont généralement des segments/représentations du même flux).
-  // Présentation : playlists variantes écrasées sous leur master, et déclinaisons de
-  // résolution d'un même flux progressif regroupées en une entrée avec choix de qualité.
-  if (!outcome.probe) {
+  if (!outcome.probe || hasTweetLabels) {
     const pageTitle = tabState.pageInfo?.pageTitle || tab.title;
-    const candidates = groupQualityVariants(collapseVariantPlaylists(tabState.candidates));
-    for (const candidate of candidates) {
+    for (const { candidate, title } of labelled) {
       sources.push({
         kind: 'sniffed',
         mediaUrl: candidate.url,
         mediaKind: candidate.kind,
-        title: pageTitle,
+        title: title ?? pageTitle,
         qualityVariants: candidate.qualityVariants,
       });
     }

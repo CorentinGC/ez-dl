@@ -87,6 +87,10 @@ export interface QuickDownloadRequest {
     mediaUrl: string | null;
     title: string | null;
     isOnlyVideo: boolean;
+    /** Contexte tweet (X/Twitter) ; validé par `sanitizeClickedVideo`. */
+    mediaId?: string;
+    pageUrl?: string;
+    playlistIndex?: number;
   };
   /** Second clic sur un bouton passé en « déjà téléchargé » : refaire quand même le job. */
   force?: boolean;
@@ -111,6 +115,14 @@ export interface DeactivatePickerMessage {
 /** Demande au content script un instantané frais des infos de page (titre/vidéos/OG). */
 export interface GetPageInfoMessage {
   type: 'GET_PAGE_INFO';
+}
+
+/**
+ * Demande au content script (X/Twitter) les vidéos présentes dans le DOM avec leur tweet ;
+ * réponse synchrone `{ videos: TweetVideoInfo[] }`. Envoyé directement par la popup.
+ */
+export interface GetTweetVideosMessage {
+  type: 'GET_TWEET_VIDEOS';
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +155,8 @@ export type BackgroundRequest =
 export type ContentRequest =
   | ActivatePickerMessage
   | DeactivatePickerMessage
-  | GetPageInfoMessage;
+  | GetPageInfoMessage
+  | GetTweetVideosMessage;
 
 /** Messages diffusés par le background vers les pages d'extension ouvertes. */
 export type ExtensionBroadcast = TabStateUpdatedMessage;

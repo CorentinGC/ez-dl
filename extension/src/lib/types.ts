@@ -105,6 +105,8 @@ export interface ProbeRequestBody {
   cookies?: CookieParam[];
   headers?: Record<string, string>;
   referer?: string;
+  /** Rang (1-based) de la vidéo voulue quand l'URL en porte plusieurs (tweet multi-vidéos). */
+  playlist_items?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +212,8 @@ export interface CreateJobRequest {
   headers?: Record<string, string>;
   referer?: string;
   title?: string;
+  /** Rang (1-based) de la vidéo voulue quand l'URL en porte plusieurs (tweet multi-vidéos). */
+  playlist_items?: number;
 }
 
 export interface CreateJobResponse {

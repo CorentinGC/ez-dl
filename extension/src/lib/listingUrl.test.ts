@@ -14,6 +14,9 @@ describe('isListingUrl', () => {
     'https://www.youtube.com/playlist?list=PL123',
     'https://www.youtube.com/feed/subscriptions',
     'https://m.youtube.com/',
+    'https://x.com/home',
+    'https://x.com/search?q=chat',
+    'https://x.com/some_user',
   ])('%s est une page de liste', (url) => {
     expect(isListingUrl(url)).toBe(true);
   });
@@ -25,6 +28,8 @@ describe('isListingUrl', () => {
     'https://www.youtube.com/shorts/abc',
     'https://www.youtube.com/live/abc',
     'https://youtu.be/abc',
+    'https://x.com/some_user/status/1846000000000000001',
+    'https://x.com/some_user/status/1846000000000000001/video/2',
     'https://example.com/',
     'https://example.com/results',
     'chrome://extensions',

@@ -335,6 +335,14 @@ describe('createApiClient() — annulation et fin de flux', () => {
     await expect(pending).rejects.toMatchObject({ name: 'NetworkError', message: 'Requête annulée.' });
   });
 
+  it('transmet playlist_items au probe GET', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await createApiClient(config).probe('https://x.com/a/status/1', { playlistItems: 2 });
+    const calls = fetchMock.mock.calls as unknown as [string][];
+    expect(calls[0]?.[0]).toContain('&playlist_items=2');
+  });
+
   it('refuse de lancer un fetch si le signal est déjà annulé', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

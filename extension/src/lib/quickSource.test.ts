@@ -296,4 +296,29 @@ describe('sanitizeClickedVideo', () => {
     expect(sanitizeClickedVideo(undefined)).toBeNull();
     expect(sanitizeClickedVideo('cassé')).toBeNull();
   });
+
+  it('conserve un contexte de tweet valide', () => {
+    const pageUrl = 'https://x.com/jane_doe/status/1846000000000000001';
+    expect(
+      sanitizeClickedVideo({ mediaUrl: null, title: null, isOnlyVideo: false, mediaId: 'abc-1_2', pageUrl, playlistIndex: 3 }),
+    ).toMatchObject({ mediaId: 'abc-1_2', pageUrl, playlistIndex: 3 });
+  });
+
+  it('écarte un contexte de tweet invalide', () => {
+    const sanitized = sanitizeClickedVideo({
+      mediaUrl: null,
+      title: null,
+      isOnlyVideo: false,
+      mediaId: '../etc',
+      pageUrl: 'https://evil.example/jane/status/1',
+      playlistIndex: 5,
+    });
+    expect(sanitized).not.toHaveProperty('mediaId');
+    expect(sanitized).not.toHaveProperty('pageUrl');
+    expect(sanitized).not.toHaveProperty('playlistIndex');
+    for (const playlistIndex of [0, 1.5, '2']) {
+      expect(sanitizeClickedVideo({ playlistIndex })).not.toHaveProperty('playlistIndex');
+    }
+    expect(sanitizeClickedVideo({ pageUrl: 'https://x.com/jane/status/1/analytics' })).not.toHaveProperty('pageUrl');
+  });
 });

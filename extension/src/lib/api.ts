@@ -235,6 +235,11 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/** Options d'un probe GET : rang de la vidéo voulue sur une page qui en porte plusieurs. */
+export interface ProbeOptions extends RequestOptions {
+  playlistItems?: number;
+}
+
 /** Config d'un appel probe : timeout long, sauf si l'appelant en a imposé un. */
 function probeConfig(config: ApiClientConfig): ApiClientConfig {
   return { ...config, timeoutMs: config.timeoutMs ?? PROBE_TIMEOUT_MS };
@@ -256,10 +261,12 @@ export function createApiClient(config: ApiClientConfig) {
       request<PublishedExtension>({ ...config, timeoutMs: UPDATE_CHECK_TIMEOUT_MS }, '/extension/version'),
 
     /** Sonde une URL sans contexte d'authentification (page publique). */
-    probe: (url: string, options: RequestOptions = {}) =>
-      request<ProbeResponse>(probeConfig(config), `/api/probe?url=${encodeURIComponent(url)}`, {
+    probe: (url: string, options: ProbeOptions = {}) => {
+      const items = options.playlistItems ? `&playlist_items=${options.playlistItems}` : '';
+      return request<ProbeResponse>(probeConfig(config), `/api/probe?url=${encodeURIComponent(url)}${items}`, {
         signal: options.signal,
-      }),
+      });
+    },
 
     /** Sonde une URL avec cookies/headers/referer (page authentifiée). L'URL voyage dans le
      * corps : la variante POST du serveur ne lit pas la query. */

@@ -5,6 +5,7 @@
  * annuler).
  */
 
+import { collectTweetVideos } from '@/src/content/tweetContext';
 import { mountVideoOverlay, setOverlaySuspended, unmountVideoOverlay } from '@/src/content/videoOverlay';
 import type { ContentRequest, PageInfoMessage, PickedElementMessage, PickerCancelledMessage } from '@/src/lib/messaging';
 import type { PageInfo, PickedElementInfo } from '@/src/lib/types';
@@ -43,6 +44,9 @@ function handleMessage(message: ContentRequest, sendResponse: (response?: unknow
       return;
     case 'GET_PAGE_INFO':
       sendResponse({ pageInfo: extractPageInfo() });
+      return;
+    case 'GET_TWEET_VIDEOS':
+      sendResponse({ videos: collectTweetVideos() });
       return;
     default:
       return; // message inconnu : pas de réponse

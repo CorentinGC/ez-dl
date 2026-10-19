@@ -15,7 +15,14 @@ import { createApiClient, NetworkError, toApiConfig } from './api';
 import { readCookiesForUrl } from './cookies';
 import { isListingUrl } from './listingUrl';
 import type { QuickDownloadResponse } from './messaging';
-import { pickQuickSource, resolveDefaultFolder, sanitizeClickedVideo, type ClickedVideo } from './quickSource';
+import {
+  pickQuickSource,
+  resolveDefaultFolder,
+  sanitizeClickedVideo,
+  type ClickedVideo,
+  type QuickJobSource,
+} from './quickSource';
+import { hasTweetContext, planTweetSource, sourceFromTweetProbe, TWEET_VIDEO_NOT_FOUND } from './tweetSource';
 import { createSingleFlight, probeFlightKey } from './singleFlight';
 import { getSettings, getTabGeneration, getTabState, isServerConfigured, updateTabState } from './storage';
 import type { ExtensionSettings, ProbeResponse, QuickProbeCache, TabState } from './types';
@@ -43,17 +50,14 @@ export async function runQuickDownload(
   if (!folder) return { ok: false, error: 'Aucun dossier favori : configurez-en un dans les options.' };
 
   const state = await getTabState(tabId);
-  const probe = await resolveProbe(tabId, tabUrl, state, clicked, settings);
-  const source = pickQuickSource({
-    probe,
-    candidates: state.candidates,
-    pageUrl: tabUrl,
-    // `sender.tab.title` est toujours frais, contrairement à l'instantané de page mémorisé, qui
-    // peut dater de la page précédente sur une navigation SPA.
-    pageTitle: tab.title?.trim() || state.pageInfo?.pageTitle || tabUrl,
-    clicked,
-  });
-  if (!source) return { ok: false, error: 'Aucune vidéo téléchargeable détectée sur cette page.' };
+  // `sender.tab.title` est toujours frais, contrairement à l'instantané de page mémorisé, qui
+  // peut dater de la page précédente sur une navigation SPA.
+  const pageTitle = tab.title?.trim() || state.pageInfo?.pageTitle || tabUrl;
+  const selection = hasTweetContext(clicked)
+    ? await selectTweetSource(clicked, state, pageTitle, settings)
+    : await selectGenericSource(tabId, tabUrl, pageTitle, state, clicked, settings);
+  if ('error' in selection) return { ok: false, error: selection.error };
+  const { source } = selection;
 
   try {
     const client = createApiClient(toApiConfig(settings));
@@ -72,11 +76,48 @@ export async function runQuickDownload(
       cookies,
       referer: tabUrl,
       title: source.title,
+      playlist_items: source.playlistItems,
     });
     return { ok: true, jobId: response.job_id };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Erreur inconnue.' };
   }
+}
+
+type SourceSelection = { source: QuickJobSource } | { error: string };
+
+/** Page « classique » : probe (ou flux sniffé) de l'onglet. */
+async function selectGenericSource(
+  tabId: number,
+  tabUrl: string,
+  pageTitle: string,
+  state: TabState,
+  clicked: ClickedVideo | null,
+  settings: ExtensionSettings,
+): Promise<SourceSelection> {
+  const probe = await resolveProbe(tabId, tabUrl, state, clicked, settings);
+  const source = pickQuickSource({ probe, candidates: state.candidates, pageUrl: tabUrl, pageTitle, clicked });
+  return source ? { source } : { error: 'Aucune vidéo téléchargeable détectée sur cette page.' };
+}
+
+/**
+ * Vidéo d'un tweet : flux sniffé du même média, sinon probe du permalink (sans le cache indexé sur
+ * l'URL de l'onglet, qui décrit une autre vidéo), sinon erreur — jamais un autre flux de l'onglet.
+ */
+async function selectTweetSource(
+  clicked: ClickedVideo,
+  state: TabState,
+  pageTitle: string,
+  settings: ExtensionSettings,
+): Promise<SourceSelection> {
+  const plan = planTweetSource(clicked, state.candidates, pageTitle);
+  if (plan.kind === 'sniffed') return { source: plan.source };
+  if (plan.kind === 'missing') return { error: TWEET_VIDEO_NOT_FOUND };
+
+  const outcome = await probeTab(plan.pageUrl, settings, plan.playlistItems);
+  const source = outcome.probe ? sourceFromTweetProbe(outcome.probe, clicked, plan.pageUrl, pageTitle) : null;
+  if (source) return { source };
+  return { error: outcome.isDefinitive ? TWEET_VIDEO_NOT_FOUND : 'Serveur injoignable : réessayez dans un instant.' };
 }
 
 // ---------------------------------------------------------------------------
@@ -134,12 +175,16 @@ interface ProbeOutcome {
   isDefinitive: boolean;
 }
 
-async function probeTab(tabUrl: string, settings: ExtensionSettings): Promise<ProbeOutcome> {
+async function probeTab(tabUrl: string, settings: ExtensionSettings, playlistItems?: number): Promise<ProbeOutcome> {
   try {
     const client = createApiClient(toApiConfig(settings));
     const probe = settings.sendCookies
-      ? await client.probeWithContext(tabUrl, { cookies: await readCookiesForUrl(tabUrl), referer: tabUrl })
-      : await client.probe(tabUrl);
+      ? await client.probeWithContext(tabUrl, {
+          cookies: await readCookiesForUrl(tabUrl),
+          referer: tabUrl,
+          playlist_items: playlistItems,
+        })
+      : await client.probe(tabUrl, { playlistItems });
     return { probe: probe.formats.length > 0 ? probe : null, isDefinitive: true };
   } catch (error) {
     // Page sans extracteur, 401… : verdict définitif, pas de bruit console. Réseau/timeout : à retenter.
