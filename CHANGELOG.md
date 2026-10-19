@@ -20,6 +20,11 @@ process, use it only if you follow the repository.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
+### Added
+
+- **extension** : export et import des réglages dans la page d'options (ez-dl-jrb) (ce97958)
 ## [0.1.3] - 2026-10-19
 
 ### Fixed
@@ -60,7 +65,8 @@ the project starts being published as versioned artifacts.
 - Opt-in auto-update inside the Docker stack (watchtower, `autoupdate` compose profile) and a host
   cron alternative for locally-built images.
 
-[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.2.0
 [0.1.3]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.3
 [0.1.2]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.1

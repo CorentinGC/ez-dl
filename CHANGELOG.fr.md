@@ -21,6 +21,11 @@ processus de release, à réserver à qui suit le dépôt.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
+### Ajouté
+
+- **extension** : export et import des réglages dans la page d'options (ez-dl-jrb) (ce97958)
 ## [0.1.3] - 2026-10-19
 
 ### Corrigé
@@ -63,7 +68,8 @@ Première version taguée. Tout ce qui suit existait déjà sur `main` ; cette v
 - Mise à jour automatique opt-in dans le stack Docker (watchtower, profil compose `autoupdate`) et
   voie alternative par cron hôte pour les images construites localement.
 
-[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.2.0
 [0.1.3]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.3
 [0.1.2]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.1
