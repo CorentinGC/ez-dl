@@ -2,7 +2,7 @@
   "name": "ez-dl-extension",
   "description": "Extension Chrome ez-dl : détecte les vidéos d'une page et les envoie à un serveur ez-dl self-hosted (yt-dlp) pour téléchargement.",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "wxt",

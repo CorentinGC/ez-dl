@@ -21,6 +21,16 @@ processus de release, à réserver à qui suit le dépôt.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-19
+
+### Corrigé
+
+- **security** : durcissement post-review overlay, proxy et copie inter-volumes (ez-dl-68t) (004153d)
+- **extension** : les boutons overlay suivent le scroll sans latence (ez-dl-blo) (aee0ca0)
+- **extension** : x.com télécharge la vidéo cliquée avec le titre du tweet (ez-dl-gap) (3cba43f)
+- **server** : file de jobs fiable — annulation, arrêt, reprise, déplacement non bloquant (ez-dl-igv, ez-dl-s0w) (39b4ba0)
+- **extension** : plus aucun probe en arrière-plan, probe à la demande (ez-dl-srp) (d321629)
+- **server** : probe yt-dlp borné, plus de process fantômes + proxy EZDL_PROXY (ez-dl-nta, ez-dl-1oa) (37cb68d)
 ## [0.1.1] - 2026-08-22
 
 ### Corrigé
@@ -48,6 +58,7 @@ Première version taguée. Tout ce qui suit existait déjà sur `main` ; cette v
 - Mise à jour automatique opt-in dans le stack Docker (watchtower, profil compose `autoupdate`) et
   voie alternative par cron hôte pour les images construites localement.
 
-[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/CorentinGC/ez-dl/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/CorentinGC/ez-dl/releases/tag/v0.1.0
