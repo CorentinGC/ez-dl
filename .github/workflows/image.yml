@@ -146,7 +146,10 @@ jobs:
         if: inputs.should_push
         uses: actions/upload-artifact@v7
         with:
-          name: digests-${{ matrix.arch }}
+          # Préfixé par la ref : ci.yml appelle ce workflow deux fois dans le même run
+          # (edge puis release). Des noms identiques mêlaient les digests des deux builds et
+          # l'index de la release pointait sur l'image edge (v0.1.2 annonçait 0.1.1).
+          name: digests-${{ inputs.ref || 'trigger' }}-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -164,7 +167,7 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: /tmp/digests
-          pattern: digests-*
+          pattern: digests-${{ inputs.ref || 'trigger' }}-*
           merge-multiple: true
 
       - name: Configurer Buildx

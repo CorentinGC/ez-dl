@@ -251,6 +251,10 @@ sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui
 
 ## Pièges / gotchas
 
+- **`image.yml` appelé deux fois dans un même run CI** (edge puis release) : les artefacts de
+  digests doivent avoir un nom propre à chaque appel (préfixe = ref), sinon l'index de la release
+  fusionne les deux builds et le tag semver pointe sur l'image edge (v0.1.2 embarquait 0.1.1,
+  `ez-dl-894`). v0.1.3 est la première release correcte après ce correctif.
 - **yt-dlp doit être le binaire standalone**, pas la version installée via pip : `-U` (self-update)
   ne fonctionne que sur le binaire standalone.
 - **MV3 = service worker qui s'endort** : ne jamais garder d'état important en mémoire seule dans
