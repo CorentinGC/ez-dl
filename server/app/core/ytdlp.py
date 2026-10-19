@@ -214,7 +214,7 @@ async def probe(
     try:
         returncode, stdout, stderr = await run_bounded(*args, timeout=timeout)
         if returncode != 0:
-            raise YtDlpError(f"yt-dlp a échoué : {_last_line(stderr)}")
+            raise YtDlpError(f"yt-dlp a échoué : {last_line(stderr)}")
         raw_info: dict[str, Any] = json.loads(stdout.decode("utf-8", errors="replace"))
     except FileNotFoundError as exc:
         raise YtDlpError(f"Binaire yt-dlp introuvable : {binary}") from exc
@@ -317,15 +317,6 @@ async def stream_progress(
         await on_progress(data)
 
 
-async def wait_download(process: asyncio.subprocess.Process) -> None:
-    """Attend la fin du process et lève `YtDlpError` si le code de retour est non nul."""
-    returncode = await process.wait()
-    if returncode == 0:
-        return
-    stderr = await process.stderr.read() if process.stderr is not None else b""
-    raise YtDlpError(f"yt-dlp a échoué (code {returncode}) : {_last_line(stderr)}")
-
-
 # yt-dlp recopie la ligne fautive du cookie-jar dans cet avertissement (non supprimé par
 # `--no-warnings`) : elle contient des cookies en clair et ne doit ni être loggée ni persistée.
 _COOKIE_LEAK_MARKER = "skipping cookie file entry"
@@ -334,7 +325,7 @@ _COOKIE_LEAK_MARKER = "skipping cookie file entry"
 _MAX_ERROR_LENGTH = 500
 
 
-def _last_line(raw: bytes) -> str:
+def last_line(raw: bytes) -> str:
     """Retourne la ligne la plus informative d'une sortie process (pour message d'erreur),
     expurgée des lignes susceptibles de contenir des cookies et tronquée.
 
@@ -361,7 +352,7 @@ async def update(binary: str = "yt-dlp", *, proxy: str = "", timeout: float = 30
         logger.warning("Auto-update yt-dlp impossible : %s", type(exc).__name__)
         return ""
     if returncode != 0:
-        logger.warning("yt-dlp -U a échoué : %s", _last_line(stderr))
+        logger.warning("yt-dlp -U a échoué : %s", last_line(stderr))
     return stdout.decode("utf-8", errors="replace").strip()
 
 

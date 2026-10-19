@@ -56,6 +56,8 @@ class Job(SQLModel, table=True):
     error: str | None = None
     preset_id: str | None = None
     format_id: str | None = None
+    # Rang (1-based) de la vidéo voulue quand l'URL en porte plusieurs (tweet multi-vidéos).
+    playlist_items: int | None = None
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow)
 

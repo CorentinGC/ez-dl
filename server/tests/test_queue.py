@@ -7,17 +7,24 @@ import asyncio
 import os
 import signal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from sqlmodel import Session
 
-from app.config import Settings
 from app.core import ytdlp
 from app.core.cookies import cookie_jar_dir
-from app.core.queue import INTERRUPTED_MESSAGE, JobQueue, _progress_fields, _stop_process_group
-from app.db import get_engine, init_db
+from app.core.process import stop_process_group
+from app.core.progress import progress_fields
+from app.core.queue import INTERRUPTED_MESSAGE
+from app.core.queue_recovery import recover_interrupted_jobs
 from app.models import Job, JobStatus
+from tests.queue_helpers import (
+    create_job,
+    finished_process,
+    install_fake_ytdlp,
+    install_hanging_ytdlp,
+    wait_until_running,
+)
 
 
 def test_progress_fields_returns_numeric_speed_eta_size() -> None:
@@ -30,7 +37,7 @@ def test_progress_fields_returns_numeric_speed_eta_size() -> None:
         "eta": 0,
     }
 
-    fields = _progress_fields(data)
+    fields = progress_fields(data)
 
     assert fields["progress"] == 50.0
     assert fields["size"] == 4_200_000
@@ -45,7 +52,7 @@ def test_progress_fields_counts_fragments_for_hls_downloads() -> None:
     """Sur un téléchargement fragmenté, `downloaded_bytes`/`total_bytes` décrivent le fragment
     en cours : s'en servir afficherait 100 % à chaque fragment fini (« Annulé 100 % »).
     C'est le compteur de fragments qui donne la position globale, et la taille reste inconnue."""
-    fields = _progress_fields(
+    fields = progress_fields(
         {
             "downloaded_bytes": 712,
             "total_bytes": 712,
@@ -61,7 +68,7 @@ def test_progress_fields_counts_fragments_for_hls_downloads() -> None:
 
 def test_progress_fields_uses_total_bytes_estimate_when_total_unknown() -> None:
     """`total_bytes_estimate` sert de repli quand `total_bytes` n'est pas encore connu."""
-    fields = _progress_fields(
+    fields = progress_fields(
         {"downloaded_bytes": 1_000, "total_bytes_estimate": 10_000, "speed": None, "eta": None}
     )
 
@@ -73,82 +80,10 @@ def test_progress_fields_uses_total_bytes_estimate_when_total_unknown() -> None:
 
 def test_progress_fields_skips_progress_and_size_without_total() -> None:
     """Sans taille totale connue, ni `progress` ni `size` ne doivent être renvoyés."""
-    fields = _progress_fields({"downloaded_bytes": 500})
+    fields = progress_fields({"downloaded_bytes": 500})
 
     assert "progress" not in fields
     assert "size" not in fields
-
-
-@pytest.fixture
-def job_queue(tmp_path):
-    """Une `JobQueue` reliée à une base SQLite de test, sans worker démarré."""
-    download_root = tmp_path / "downloads"
-    download_root.mkdir()
-    settings = Settings(
-        password="test-secret",
-        download_roots=f"Downloads={download_root}",
-        data_dir=tmp_path / "data",
-        temp_dir=tmp_path / "temp",
-    )
-    engine = get_engine(settings)
-    init_db(settings)
-    queue = JobQueue(settings, engine, encoders={})
-    return queue, engine, settings
-
-
-def _create_job(engine, settings, filename: str = "video.mp4") -> str:
-    """Insère un job `queued` visant la première racine de téléchargement."""
-    with Session(engine) as session:
-        job = Job(
-            url="https://example.com/video",
-            folder=str(settings.roots[0].path),
-            filename=filename,
-            status=JobStatus.QUEUED.value,
-        )
-        session.add(job)
-        session.commit()
-        session.refresh(job)
-        return job.id
-
-
-def _install_fake_ytdlp(
-    monkeypatch,
-    produced: dict[str, bytes],
-    progress=None,
-    seen_files: list[list[str]] | None = None,
-) -> list[Path]:
-    """Simule yt-dlp : écrit `produced` (nom -> contenu) dans le dossier du template `-o`.
-
-    Le vrai binaire choisit lui-même le nom de sortie (il impose l'extension du conteneur
-    réellement produit) : le fake reçoit donc un template, pas un chemin final.
-    Retourne la liste des dossiers de travail utilisés, pour vérifier leur nettoyage.
-    `seen_files` reçoit le contenu du dossier de travail *avant* écriture (état de reprise).
-    """
-    work_dirs: list[Path] = []
-
-    async def fake_start_download(url: str, output_template: Path, **kwargs: object):
-        work_dir = Path(output_template).parent
-        work_dirs.append(work_dir)
-        assert "%(ext)s" in Path(output_template).name, "le nom de sortie ne doit pas être deviné"
-        work_dir.mkdir(parents=True, exist_ok=True)
-        if seen_files is not None:
-            seen_files.append(sorted(path.name for path in work_dir.iterdir()))
-        for name, content in produced.items():
-            (work_dir / name).write_bytes(content)
-        return SimpleNamespace(stdout=None, stderr=None, returncode=0, kill=lambda: None)
-
-    async def fake_stream_progress(process: object, on_progress) -> None:
-        if on_progress is None or progress is None:
-            return
-        await on_progress(progress)
-
-    async def fake_wait_download(process: object) -> None:
-        return None
-
-    monkeypatch.setattr(ytdlp, "start_download", fake_start_download)
-    monkeypatch.setattr(ytdlp, "stream_progress", fake_stream_progress)
-    monkeypatch.setattr(ytdlp, "wait_download", fake_wait_download)
-    return work_dirs
 
 
 async def test_run_job_persists_numeric_progress_and_real_final_size(
@@ -157,10 +92,10 @@ async def test_run_job_persists_numeric_progress_and_real_final_size(
     """Pipeline complet d'un job (download -> move) : `speed`/`eta` restent numériques et
     `size` final reflète la taille réelle du fichier déplacé, pas la dernière estimation."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
+    job_id = create_job(engine, settings)
     downloaded_bytes = b"x" * 4_200_000
 
-    _install_fake_ytdlp(
+    install_fake_ytdlp(
         monkeypatch,
         {"download.mp4": downloaded_bytes},
         # Frame de progression brute telle qu'émise par `--progress-template` (valeurs numériques).
@@ -190,8 +125,8 @@ async def test_run_job_moves_output_whatever_container_ytdlp_chose(job_queue, mo
     """Le conteneur produit (ici `.mkv`, après un merge) n'est pas celui du nom demandé :
     le pipeline doit récupérer le fichier réellement écrit, pas un nom présumé."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
-    work_dirs = _install_fake_ytdlp(monkeypatch, {"download.mkv": b"y" * 2_048})
+    job_id = create_job(engine, settings)
+    work_dirs = install_fake_ytdlp(monkeypatch, {"download.mkv": b"y" * 2_048})
 
     await queue._run_job(job_id)
 
@@ -202,7 +137,8 @@ async def test_run_job_moves_output_whatever_container_ytdlp_chose(job_queue, mo
         assert persisted.status == JobStatus.DONE.value
         assert persisted.size == 2_048
 
-    destination = settings.roots[0].path / "video.mp4"
+    # L'extension annoncée par le client (.mp4) cède devant le conteneur réel (.mkv).
+    destination = settings.roots[0].path / "video.mkv"
     assert destination.read_bytes() == b"y" * 2_048
     # Dossier de travail supprimé : pas de résidu par job dans EZDL_TEMP_DIR.
     assert work_dirs and not work_dirs[0].exists()
@@ -212,8 +148,8 @@ async def test_run_job_ignores_partial_leftovers(job_queue, monkeypatch) -> None
     """Les résidus yt-dlp (`.part`, `.ytdl`) ne doivent jamais être pris pour le résultat,
     même quand ils sont plus gros que le fichier final."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
-    _install_fake_ytdlp(
+    job_id = create_job(engine, settings)
+    install_fake_ytdlp(
         monkeypatch,
         {
             "download.mp4": b"final",
@@ -234,8 +170,8 @@ async def test_run_job_never_overwrites_an_existing_file(job_queue, monkeypatch)
     queue, engine, settings = job_queue
     existing = settings.roots[0].path / "video.mp4"
     existing.write_bytes(b"ORIGINAL A NE PAS PERDRE")
-    job_id = _create_job(engine, settings)
-    _install_fake_ytdlp(monkeypatch, {"download.mp4": b"nouveau"})
+    job_id = create_job(engine, settings)
+    install_fake_ytdlp(monkeypatch, {"download.mp4": b"nouveau"})
 
     await queue._run_job(job_id)
 
@@ -254,7 +190,7 @@ async def test_run_job_errors_when_root_vanishes_during_download(job_queue, monk
     """Volume démonté pendant le téléchargement : le job échoue au lieu de recréer
     l'arborescence sur la couche locale et d'annoncer un `done` trompeur."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
+    job_id = create_job(engine, settings)
     root = settings.roots[0].path
 
     async def fake_start_download(url: str, output_template: Path, **kwargs: object):
@@ -262,14 +198,13 @@ async def test_run_job_errors_when_root_vanishes_during_download(job_queue, monk
         work_dir.mkdir(parents=True, exist_ok=True)
         (work_dir / "download.mp4").write_bytes(b"contenu")
         root.rmdir()  # la racine disparaît après la création du job
-        return SimpleNamespace(stdout=None, stderr=None, returncode=0, kill=lambda: None)
+        return finished_process()
 
     async def noop(*args: object, **kwargs: object) -> None:
         return None
 
     monkeypatch.setattr(ytdlp, "start_download", fake_start_download)
     monkeypatch.setattr(ytdlp, "stream_progress", noop)
-    monkeypatch.setattr(ytdlp, "wait_download", noop)
 
     await queue._run_job(job_id)
 
@@ -284,8 +219,8 @@ async def test_run_job_errors_when_root_vanishes_during_download(job_queue, monk
 async def test_run_job_reports_error_when_ytdlp_produced_nothing(job_queue, monkeypatch) -> None:
     """Sortie vide malgré un code retour 0 : le job passe en erreur explicite, pas en `done`."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
-    work_dirs = _install_fake_ytdlp(monkeypatch, {})
+    job_id = create_job(engine, settings)
+    work_dirs = install_fake_ytdlp(monkeypatch, {})
 
     await queue._run_job(job_id)
 
@@ -300,70 +235,15 @@ async def test_run_job_reports_error_when_ytdlp_produced_nothing(job_queue, monk
     assert work_dirs and work_dirs[0].exists()
 
 
-class _HangingProcess:
-    """Process yt-dlp factice qui ne rend la main qu'une fois signalé (SIGTERM/SIGKILL)."""
-
-    def __init__(self) -> None:
-        self.returncode: int | None = None
-        self.stdout = None
-        self.stderr = None
-        # Pid inexistant : `_stop_process_group` doit alors retomber sur `send_signal` plutôt
-        # que de viser un groupe de process — surtout pas celui qui exécute les tests.
-        self.pid = -1
-        self._stopped = asyncio.Event()
-
-    def send_signal(self, sig: int) -> None:
-        self.returncode = -int(sig)
-        self._stopped.set()
-
-    def terminate(self) -> None:
-        self.send_signal(signal.SIGTERM)
-
-    def kill(self) -> None:
-        self.send_signal(signal.SIGKILL)
-
-    async def wait(self) -> int:
-        await self._stopped.wait()
-        return self.returncode or 0
-
-
-def _install_hanging_ytdlp(monkeypatch, seen_files: list[list[str]]) -> None:
-    """Simule un yt-dlp qui écrit un `.part` puis télécharge sans fin.
-
-    `seen_files` reçoit, à chaque lancement, le contenu du dossier de travail *avant* le
-    téléchargement : c'est ce qui prouve qu'une reprise retrouve bien le fichier partiel.
-    `stream_progress` et `wait_download` restent les vraies implémentations — c'est leur
-    échec sur un process signalé qui doit être traduit en pause, pas en erreur.
-    """
-
-    async def fake_start_download(url: str, output_template: Path, **kwargs: object):
-        work_dir = Path(output_template).parent
-        work_dir.mkdir(parents=True, exist_ok=True)
-        seen_files.append(sorted(path.name for path in work_dir.iterdir()))
-        (work_dir / "download.mp4.part").write_bytes(b"p" * 4_096)
-        return _HangingProcess()
-
-    monkeypatch.setattr(ytdlp, "start_download", fake_start_download)
-
-
-async def _wait_until_running(queue: JobQueue, job_id: str) -> None:
-    """Attend que le process du job soit enregistré (donc interruptible), sans `sleep` fixe."""
-    for _ in range(1_000):
-        if job_id in queue._processes:
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("le process du job n'a jamais été enregistré")
-
-
 async def test_pause_suspends_job_and_keeps_the_partial_file(job_queue, monkeypatch) -> None:
     """Pause d'un téléchargement en cours : statut `paused`, pas `error`, et le `.part` reste
     sur place — sans lui la reprise repartirait de zéro."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
-    _install_hanging_ytdlp(monkeypatch, [])
+    job_id = create_job(engine, settings)
+    install_hanging_ytdlp(monkeypatch, [])
 
     task = asyncio.create_task(queue._run_job(job_id))
-    await _wait_until_running(queue, job_id)
+    await wait_until_running(queue, job_id)
     queue.pause(job_id)
     await task
 
@@ -383,12 +263,12 @@ async def test_resume_restarts_from_the_partial_file(job_queue, monkeypatch) -> 
     """Reprise après pause : yt-dlp est relancé dans le dossier de travail conservé, avec le
     `.part` déjà présent."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
+    job_id = create_job(engine, settings)
     seen_files: list[list[str]] = []
-    _install_hanging_ytdlp(monkeypatch, seen_files)
+    install_hanging_ytdlp(monkeypatch, seen_files)
 
     task = asyncio.create_task(queue._run_job(job_id))
-    await _wait_until_running(queue, job_id)
+    await wait_until_running(queue, job_id)
     queue.pause(job_id)
     await task
 
@@ -396,7 +276,7 @@ async def test_resume_restarts_from_the_partial_file(job_queue, monkeypatch) -> 
     queue.enqueue(job_id)
     queue.update(job_id, status=JobStatus.QUEUED, error=None)
     seen_on_resume: list[list[str]] = []
-    _install_fake_ytdlp(monkeypatch, {"download.mp4": b"complet"}, seen_files=seen_on_resume)
+    install_fake_ytdlp(monkeypatch, {"download.mp4": b"complet"}, seen_files=seen_on_resume)
     await queue._run_job(job_id)
 
     # Le premier lancement démarre à vide, la reprise retrouve le fichier partiel.
@@ -414,11 +294,11 @@ async def test_resume_restarts_from_the_partial_file(job_queue, monkeypatch) -> 
 async def test_cancel_discards_the_partial_file(job_queue, monkeypatch) -> None:
     """Annulation (et non pause) : le dossier de travail part, un `retry` repartira de zéro."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
-    _install_hanging_ytdlp(monkeypatch, [])
+    job_id = create_job(engine, settings)
+    install_hanging_ytdlp(monkeypatch, [])
 
     task = asyncio.create_task(queue._run_job(job_id))
-    await _wait_until_running(queue, job_id)
+    await wait_until_running(queue, job_id)
     queue.cancel(job_id)
     await task
 
@@ -435,9 +315,9 @@ async def test_run_job_ignores_an_entry_whose_job_is_no_longer_queued(
     """Une reprise ré-enfile l'id sans pouvoir retirer l'entrée obsolète : le second passage
     ne doit pas relancer un téléchargement déjà pris en charge."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
+    job_id = create_job(engine, settings)
     queue.update(job_id, status=JobStatus.PAUSED)
-    work_dirs = _install_fake_ytdlp(monkeypatch, {"download.mp4": b"x"})
+    work_dirs = install_fake_ytdlp(monkeypatch, {"download.mp4": b"x"})
 
     await queue._run_job(job_id)
 
@@ -452,10 +332,10 @@ def test_recover_interrupted_jobs_suspends_instead_of_erroring(job_queue) -> Non
     """Redémarrage du serveur : un job en cours devient `paused` (donc reprenable) et porte
     le motif de l'interruption, au lieu d'être classé en erreur définitive."""
     queue, engine, settings = job_queue
-    job_id = _create_job(engine, settings)
+    job_id = create_job(engine, settings)
     queue.update(job_id, status=JobStatus.DOWNLOADING, speed=1_000.0, eta=42)
 
-    queue._recover_interrupted_jobs()
+    recover_interrupted_jobs(engine)
 
     with Session(engine) as session:
         persisted = session.get(Job, job_id)
@@ -475,12 +355,12 @@ async def test_start_purges_stale_temp_residue_but_keeps_resumable_jobs(job_queu
     orphan.mkdir(parents=True)
     (orphan / "download.mp4.part").write_bytes(b"o" * 128)
 
-    done_id = _create_job(engine, settings, filename="fini.mp4")
+    done_id = create_job(engine, settings, filename="fini.mp4")
     queue.update(done_id, status=JobStatus.DONE)
     done_dir = queue.work_dir(done_id)
     done_dir.mkdir(parents=True)
 
-    paused_id = _create_job(engine, settings, filename="suspendu.mp4")
+    paused_id = create_job(engine, settings, filename="suspendu.mp4")
     queue.update(paused_id, status=JobStatus.PAUSED)
     kept = queue.work_dir(paused_id)
     kept.mkdir(parents=True)
@@ -529,7 +409,7 @@ async def test_stop_process_group_kills_the_whole_tree() -> None:
     os.kill(grandchild_pid, 0)  # vivant avant l'arrêt
 
     try:
-        _stop_process_group(process, signal.SIGKILL)
+        stop_process_group(process, signal.SIGKILL)
         # Ne pas attendre `process.wait()` : le petit-fils hérite de stdout, la boucle asyncio
         # ne rendrait la main qu'à la fermeture du pipe — donc à sa mort naturelle, ce qui
         # masquerait justement le bug qu'on teste.
@@ -556,7 +436,7 @@ async def test_stop_process_group_spares_the_server_group() -> None:
     `killpg` y enverrait le signal à uvicorn lui-même. Seul le process visé doit tomber."""
     process = await asyncio.create_subprocess_exec("sh", "-c", "sleep 30")
 
-    _stop_process_group(process, signal.SIGKILL)
+    stop_process_group(process, signal.SIGKILL)
     await process.wait()
 
     assert process.returncode is not None

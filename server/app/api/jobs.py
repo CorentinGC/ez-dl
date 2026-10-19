@@ -12,13 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlmodel import Session, select
 from sse_starlette.sse import EventSourceResponse
 
+from app.core.job_context import JobContext
 from app.core.paths import (
     PathSecurityError,
     remove_destination_file,
     resolve_destination,
     sanitize_filename,
 )
-from app.core.queue import JobContext
 from app.db import get_session
 from app.models import Job, JobStatus
 from app.schemas import JobCreate, JobCreateResponse, JobDuplicateOut, JobOut, JobResume
@@ -75,6 +75,7 @@ async def create_job(
         status=JobStatus.QUEUED.value,
         preset_id=body.preset_id,
         format_id=body.format_id,
+        playlist_items=body.playlist_items,
     )
     session.add(job)
     session.commit()
@@ -95,16 +96,18 @@ async def list_jobs(session: Session = Depends(get_session)) -> list[Job]:
 async def job_events(request: Request) -> EventSourceResponse:
     """Flux SSE des mises à jour de jobs (event `job`), avec heartbeat périodique."""
     broadcaster = request.app.state.job_queue.broadcaster
-    subscriber = broadcaster.subscribe()
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
+        # Abonnement **dans** le générateur : si le flux n'est jamais itéré (client parti
+        # avant le premier envoi), le `finally` ne s'exécuterait pas et la file fuirait.
+        subscriber = broadcaster.subscribe()
         try:
             while True:
                 if await request.is_disconnected():
                     break
                 try:
-                    job = await asyncio.wait_for(subscriber.get(), timeout=_HEARTBEAT_SECONDS)
-                    yield {"event": "job", "data": JobOut.model_validate(job).model_dump_json()}
+                    snapshot = await asyncio.wait_for(subscriber.get(), timeout=_HEARTBEAT_SECONDS)
+                    yield {"event": "job", "data": snapshot.model_dump_json()}
                 except TimeoutError:
                     yield {"event": "heartbeat", "data": ""}
         finally:
@@ -280,11 +283,16 @@ def _find_job_by_url(session: Session, url: str) -> Job | None:
     """Job le plus pertinent portant la même adresse : un job abouti d'abord, sinon le
     plus récent (l'ordre de la requête est déjà décroissant)."""
     target = _normalized_url(url)
-    matches = [
-        job
-        for job in session.exec(select(Job).order_by(Job.created_at.desc())).all()
-        if JobStatus(job.status) in _DELIVERED_STATUSES and _normalized_url(job.url) == target
-    ]
+    # Pré-filtre SQL sur le préfixe (schéma + hôte + chemin) : inutile de charger tout
+    # l'historique. `LIKE` SQLite ignore la casse ASCII, comme `_normalized_url` pour
+    # l'hôte ; le préfixe attrape aussi `/video2` pour `/video`, d'où la re-vérification.
+    statement = (
+        select(Job)
+        .where(Job.url.startswith(target, autoescape=True))
+        .where(Job.status.in_([status.value for status in _DELIVERED_STATUSES]))
+        .order_by(Job.created_at.desc())
+    )
+    matches = [job for job in session.exec(statement) if _normalized_url(job.url) == target]
     done = next((job for job in matches if job.status == JobStatus.DONE.value), None)
     return done or (matches[0] if matches else None)
 

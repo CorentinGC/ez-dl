@@ -144,10 +144,10 @@ def test_suggested_filename_is_sanitized_and_has_extension() -> None:
     assert "/" not in name
 
 
-def test_last_line_drops_cookie_jar_warnings() -> None:
+def testlast_line_drops_cookie_jar_warnings() -> None:
     """yt-dlp recopie la ligne fautive du cookie-jar dans un avertissement : elle contient
     des cookies en clair et ne doit jamais atteindre `job.error` ni les logs."""
-    from app.core.ytdlp import _last_line
+    from app.core.ytdlp import last_line
 
     # L'avertissement est la DERNIÈRE ligne : sans filtrage, c'est lui qui serait remonté.
     stderr = (
@@ -156,35 +156,35 @@ def test_last_line_drops_cookie_jar_warnings() -> None:
         b"'.example.com\\tTRUE\\t/\\tTRUE\\t0\\tauth_token\\ts3cr3t'\n"
     )
 
-    message = _last_line(stderr)
+    message = last_line(stderr)
 
     assert "s3cr3t" not in message
     assert message == "ERROR: [generic] Unable to download webpage"
 
 
-def test_last_line_falls_back_when_only_cookie_warnings() -> None:
+def testlast_line_falls_back_when_only_cookie_warnings() -> None:
     """Si tout le stderr est filtré, on ne remonte rien plutôt qu'une ligne de cookies."""
-    from app.core.ytdlp import _last_line
+    from app.core.ytdlp import last_line
 
     stderr = b"WARNING: skipping cookie file entry due to x: '.example.com\\tauth\\ts3cr3t'\n"
 
-    assert _last_line(stderr) == "erreur inconnue"
+    assert last_line(stderr) == "erreur inconnue"
 
 
-def test_last_line_is_truncated() -> None:
+def testlast_line_is_truncated() -> None:
     """Un stderr verbeux ne doit pas remplir la base ni les logs."""
-    from app.core.ytdlp import _last_line
+    from app.core.ytdlp import last_line
 
-    assert len(_last_line(b"ERROR: " + b"x" * 5000)) == 500
+    assert len(last_line(b"ERROR: " + b"x" * 5000)) == 500
 
 
-def test_last_line_prefers_the_error_line_over_a_trailing_hint() -> None:
+def testlast_line_prefers_the_error_line_over_a_trailing_hint() -> None:
     """yt-dlp fait suivre son `ERROR:` de conseils : c'est la cause qui doit remonter à l'UI."""
-    from app.core.ytdlp import _last_line
+    from app.core.ytdlp import last_line
 
     stderr = (
         b"ERROR: [youtube] abc123: Requested format is not available\n"
         b"Install a JS runtime; see  https://github.com/yt-dlp/yt-dlp/wiki/EJS  for details\n"
     )
 
-    assert _last_line(stderr).startswith("ERROR: [youtube] abc123: Requested format")
+    assert last_line(stderr).startswith("ERROR: [youtube] abc123: Requested format")

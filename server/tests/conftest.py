@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from app.config import Settings, get_settings
+from app.core.queue import JobQueue
+from app.db import get_engine, init_db
 
 TEST_PASSWORD = "test-secret"
 
@@ -88,3 +90,20 @@ def client_no_worker(base_env, monkeypatch):
 
     with TestClient(create_app()) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def job_queue(tmp_path):
+    """Une `JobQueue` reliée à une base SQLite de test, sans worker démarré."""
+    download_root = tmp_path / "downloads"
+    download_root.mkdir()
+    settings = Settings(
+        password="test-secret",
+        download_roots=f"Downloads={download_root}",
+        data_dir=tmp_path / "data",
+        temp_dir=tmp_path / "temp",
+    )
+    engine = get_engine(settings)
+    init_db(settings)
+    queue = JobQueue(settings, engine, encoders={})
+    return queue, engine, settings
