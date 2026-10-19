@@ -4,23 +4,18 @@
  *
  * Contraintes de contexte : un content script s'exécute dans une page hostile, sans accès aux
  * cookies ni au serveur. Tout ce fichier ne fait donc que du DOM et de la messagerie — le
- * background décide de la disponibilité et crée le job (`src/lib/quickDownload.ts`).
+ * background sonde le serveur et crée le job **au clic uniquement** (`src/lib/quickDownload.ts`) :
+ * afficher un bouton ne déclenche aucune requête.
  *
  * L'UI vit dans un **Shadow DOM** : ni les styles de la page ne l'atteignent, ni les siens ne
- * fuient. Les boutons n'apparaissent que si le background a confirmé une source téléchargeable.
+ * fuient. Un bouton apparaît dès qu'un `<video>` assez grand et visible existe ; si le clic ne
+ * débouche sur aucune source, le bouton passe en erreur.
  */
 
 import { findVideoTitle } from './videoTitleDom';
-import type {
-  OverlayCheckRequest,
-  OverlayCheckResponse,
-  QuickDownloadRequest,
-  QuickDownloadResponse,
-} from '@/src/lib/messaging';
+import type { QuickDownloadRequest, QuickDownloadResponse } from '@/src/lib/messaging';
 import { computeBadgePosition, isEligibleVideoSize, isRectVisible } from '@/src/lib/overlayGeometry';
 import { buildOverlayStyle, buildBadge, buildToast, setBadgeState, type BadgeState } from './overlayElements';
-
-type Availability = 'unknown' | 'pending' | 'available' | 'unavailable';
 
 interface Badge {
   button: HTMLButtonElement;
@@ -37,11 +32,6 @@ interface OverlayState {
   observer: MutationObserver;
   teardown: (() => void)[];
   badges: Map<HTMLVideoElement, Badge>;
-  availability: Availability;
-  /** URL de page au moment du dernier verdict : une navigation SPA le rend caduc. */
-  checkedUrl: string;
-  /** Une vidéo exposait-elle son média lors du dernier verdict ? Son apparition en relance un. */
-  checkedDirectMedia: boolean;
   /** Suspendu pendant le mode picker, pour ne pas voler le clic de sélection. */
   suspended: boolean;
   frame: number | null;
@@ -84,9 +74,6 @@ export function mountVideoOverlay(): void {
     observer,
     teardown: [],
     badges: new Map(),
-    availability: 'unknown',
-    checkedUrl: location.href,
-    checkedDirectMedia: false,
     suspended: false,
     frame: null,
     toastTimer: null,
@@ -117,14 +104,6 @@ export function setOverlaySuspended(suspended: boolean): void {
   scheduleSync();
 }
 
-/** Le background signale qu'une source vient d'être détectée sur cet onglet. */
-export function markOverlayAvailable(): void {
-  if (!state) return;
-  state.availability = 'available';
-  state.checkedUrl = location.href;
-  scheduleSync();
-}
-
 function listen(target: EventTarget, type: string, handler: EventListener, capture: boolean): void {
   target.addEventListener(type, handler, capture);
   state?.teardown.push(() => target.removeEventListener(type, handler, capture));
@@ -145,25 +124,11 @@ function scheduleSync(): void {
 function sync(): void {
   if (!state) return;
 
-  // Navigation SPA : le verdict du background portait sur l'ancienne URL.
-  if (state.checkedUrl !== location.href) {
-    state.availability = 'unknown';
-    state.checkedUrl = location.href;
-  }
-
-  const videos = findEligibleVideos();
-  const hasDirectMedia = videos.some((video) => mediaUrlOf(video) !== null);
-  // Une vidéo qui expose son média est téléchargeable même si le probe avait échoué : on redemande.
-  if (state.availability === 'unavailable' && hasDirectMedia && !state.checkedDirectMedia) {
-    state.availability = 'unknown';
-  }
-  if (state.availability === 'unknown') void requestAvailability(hasDirectMedia);
-
-  if (state.suspended || state.availability !== 'available') {
+  if (state.suspended) {
     clearBadges();
     return;
   }
-  renderBadges(videos);
+  renderBadges(findEligibleVideos());
 }
 
 /** Vidéos assez grandes et visibles pour mériter un bouton, les plus grandes d'abord. */
@@ -250,23 +215,6 @@ function mediaUrlOf(video: HTMLVideoElement): string | null {
 // ---------------------------------------------------------------------------
 // Messagerie
 // ---------------------------------------------------------------------------
-
-async function requestAvailability(hasDirectMedia: boolean): Promise<void> {
-  if (!state || state.availability === 'pending') return;
-  state.availability = 'pending';
-  const url = location.href;
-  try {
-    const request: OverlayCheckRequest = { type: 'OVERLAY_CHECK', hasDirectMedia };
-    const response = (await browser.runtime.sendMessage(request)) as OverlayCheckResponse | undefined;
-    if (!state) return;
-    state.availability = response?.available ? 'available' : 'unavailable';
-    state.checkedUrl = url;
-    state.checkedDirectMedia = hasDirectMedia;
-  } catch {
-    if (state) state.availability = 'unavailable'; // Background endormi/rechargé : pas de bouton.
-  }
-  scheduleSync();
-}
 
 async function submitQuickDownload(video: HTMLVideoElement): Promise<void> {
   const badge = state?.badges.get(video);

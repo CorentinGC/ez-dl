@@ -8,9 +8,9 @@
  * tout état durable transite par `chrome.storage.session`/`local` (voir `src/lib/storage.ts`).
  */
 
-import { toApiConfig, createApiClient, type ApiError } from '@/src/lib/api';
+import { createApiClient, toApiConfig, type ApiError } from '@/src/lib/api';
 import {
-  applySiteRules,
+  applyCompiledSiteRules,
   classifyUrl,
   correlatePickedElement,
   dedupeCandidates,
@@ -21,34 +21,30 @@ import type {
   BackgroundRequest,
   ContentRequest,
   GetTabStateResponse,
-  OverlayCheckResponse,
   QuickDownloadResponse,
   SaveRuleResponse,
   TabStateUpdatedMessage,
 } from '@/src/lib/messaging';
+import { hasPageChanged } from '@/src/lib/pageNavigation';
 import { hasActiveServerChanged } from '@/src/lib/profiles';
-import { resolveOverlayAvailability, runQuickDownload } from '@/src/lib/quickDownload';
+import { runQuickDownload } from '@/src/lib/quickDownload';
+import { isExtensionSender } from '@/src/lib/senderGuard';
+import { getCompiledRules, invalidateRules } from '@/src/lib/siteRulesCache';
 import {
   EMPTY_TAB_STATE,
-  RULES_CACHE_TTL_MS,
   clearTabState,
-  getCachedRules,
   getSettings,
+  getTabGeneration,
   getTabState,
-  invalidateRulesCache,
   isServerConfigured,
-  setCachedRules,
-  setTabState,
+  updateTabState,
 } from '@/src/lib/storage';
-import type { MediaCandidate, PageInfo, RawRequest, SiteRule } from '@/src/lib/types';
+import type { MediaCandidate, PageInfo, RawRequest } from '@/src/lib/types';
 
 /** Ressources réseau observées : couvre <video>/<audio> direct et manifestes via XHR/fetch. */
 const OBSERVED_RESOURCE_TYPES: `${Browser.webRequest.ResourceType}`[] = ['media', 'xmlhttprequest', 'object', 'other'];
 
 const BADGE_COLOR = '#2563eb';
-
-/** Fusionne plusieurs fetch concurrents des règles apprises en une seule requête serveur. */
-let rulesFetchInFlight: Promise<SiteRule[]> | null = null;
 
 export default defineBackground(() => {
   void browser.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
@@ -66,8 +62,7 @@ export default defineBackground(() => {
 
   // Navigation vers une nouvelle page : les candidats de l'ancienne page n'ont plus de sens.
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status !== 'loading' || !changeInfo.url) return;
-    void clearTabState(tabId).then(() => refreshBadgeIfActive(tabId, 0));
+    if (changeInfo.url) void handleUrlChange(tabId, changeInfo.url, changeInfo.status === 'loading');
   });
 
   browser.tabs.onRemoved.addListener((tabId) => {
@@ -83,7 +78,7 @@ export default defineBackground(() => {
   // vider le cache à chaque renommage de profil ou ajout de favori.
   browser.storage.local.onChanged.addListener((changes) => {
     const change = changes.settings;
-    if (change && hasActiveServerChanged(change.oldValue, change.newValue)) void invalidateRulesCache();
+    if (change && hasActiveServerChanged(change.oldValue, change.newValue)) void invalidateRules();
   });
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -133,6 +128,8 @@ function parseContentLength(raw: string | null): number | null {
 }
 
 async function recordRawRequest(raw: RawRequest): Promise<void> {
+  // Génération capturée avant tout `await` : une purge survenue pendant le traitement l'invalide.
+  const generation = getTabGeneration(raw.tabId);
   let candidate: MediaCandidate | null = null;
 
   if (isMediaUrl(raw.url, raw.contentType)) {
@@ -145,65 +142,42 @@ async function recordRawRequest(raw: RawRequest): Promise<void> {
       discoveredAt: raw.timeStamp ?? Date.now(),
     };
   } else {
-    // Pas de match générique : on tente les règles de site apprises pour ce domaine.
-    const rules = await getRulesForUrl(raw.url);
-    candidate = applySiteRules([raw], rules)[0] ?? null;
+    // Pas de match générique : on tente les règles de site apprises (compilées, en mémoire).
+    candidate = applyCompiledSiteRules([raw], await getCompiledRules())[0] ?? null;
   }
 
   if (!candidate) return;
-  await mergeCandidate(raw.tabId, candidate);
+  await mergeCandidate(raw.tabId, candidate, generation);
 }
 
-async function mergeCandidate(tabId: number, candidate: MediaCandidate): Promise<void> {
-  const state = await getTabState(tabId);
-  const candidates = groupSegmentsByPlaylist(dedupeCandidates([...state.candidates, candidate]));
-  if (candidates.length === state.candidates.length && candidates.every((c, i) => c.url === state.candidates[i]?.url)) {
-    return; // Rien de nouveau : pas d'écriture ni de broadcast inutiles.
-  }
-  await setTabState(tabId, { ...state, candidates, updatedAt: Date.now() });
-  await refreshBadgeIfActive(tabId, candidates.length);
-  broadcastTabStateUpdated(tabId, candidates.length);
-  notifyOverlayAvailable(tabId);
+async function mergeCandidate(tabId: number, candidate: MediaCandidate, generation: number): Promise<void> {
+  const written = await updateTabState(
+    tabId,
+    (state) => {
+      const candidates = groupSegmentsByPlaylist(dedupeCandidates([...state.candidates, candidate]));
+      const isUnchanged =
+        candidates.length === state.candidates.length && candidates.every((c, i) => c.url === state.candidates[i]?.url);
+      // Rien de nouveau : pas d'écriture ni de broadcast inutiles.
+      return isUnchanged ? null : { ...state, candidates, updatedAt: Date.now() };
+    },
+    generation,
+  );
+  if (!written) return;
+  await refreshBadgeIfActive(tabId, written.candidates.length);
+  broadcastTabStateUpdated(tabId, written.candidates.length);
 }
 
-/** Règles apprises applicables au domaine d'une URL, avec cache TTL dans storage.session. */
-async function getRulesForUrl(url: string): Promise<SiteRule[]> {
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return [];
+/**
+ * Changement d'URL d'un onglet. `status: 'loading'` couvre les vraies navigations ; les SPA
+ * (YouTube, X) changent d'URL sans l'émettre, d'où la comparaison avec l'URL mémorisée.
+ */
+async function handleUrlChange(tabId: number, url: string, isLoading: boolean): Promise<void> {
+  // Purge immédiate sur `loading` : lire l'état d'abord laisserait filtrer les requêtes de la nouvelle page.
+  if (isLoading || hasPageChanged((await getTabState(tabId)).pageUrl, url)) {
+    await clearTabState(tabId);
+    await refreshBadgeIfActive(tabId, 0);
   }
-  const cached = await getCachedRules();
-  if (cached) return filterRulesForHostname(cached, hostname);
-
-  if (!rulesFetchInFlight) {
-    rulesFetchInFlight = fetchAllRules().finally(() => {
-      rulesFetchInFlight = null;
-    });
-  }
-  return filterRulesForHostname(await rulesFetchInFlight, hostname);
-}
-
-function filterRulesForHostname(rules: SiteRule[], hostname: string): SiteRule[] {
-  return rules.filter((rule) => hostname === rule.domain || hostname.endsWith(`.${rule.domain}`));
-}
-
-async function fetchAllRules(): Promise<SiteRule[]> {
-  const settings = await getSettings();
-  if (!isServerConfigured(settings)) {
-    await setCachedRules([], RULES_CACHE_TTL_MS);
-    return [];
-  }
-  try {
-    const rules = await createApiClient(toApiConfig(settings)).listRules();
-    await setCachedRules(rules);
-    return rules;
-  } catch {
-    // Serveur injoignable : le sniffer générique reste opérationnel, on retente vite (30s).
-    await setCachedRules([], 30_000);
-    return [];
-  }
+  await updateTabState(tabId, (state) => (state.pageUrl === url ? null : { ...state, pageUrl: url }));
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +204,18 @@ function broadcastTabStateUpdated(tabId: number, candidateCount: number): void {
 // Messagerie (popup/options/content -> background)
 // ---------------------------------------------------------------------------
 
+/** Types de messages réservés aux pages de l'extension (popup/options) : jamais à un content script. */
+const PRIVILEGED_MESSAGE_TYPES: ReadonlySet<BackgroundRequest['type']> = new Set([
+  'SAVE_RULE',
+  'GET_TAB_STATE',
+  'CLEAR_TAB',
+  'START_PICKER',
+]);
+
 async function handleMessage(message: BackgroundRequest, sender: Browser.runtime.MessageSender): Promise<unknown> {
+  if (PRIVILEGED_MESSAGE_TYPES.has(message.type) && !isExtensionSender(sender.url, browser.runtime.getURL(''))) {
+    return { ok: false, error: 'Expéditeur non autorisé.' };
+  }
   switch (message.type) {
     case 'GET_TAB_STATE':
       return handleGetTabState(message.tabId);
@@ -249,8 +234,6 @@ async function handleMessage(message: BackgroundRequest, sender: Browser.runtime
       return handlePickedElement(sender.tab?.id, message);
     case 'PICKER_CANCELLED':
       return { ok: true };
-    case 'OVERLAY_CHECK':
-      return handleOverlayCheck(sender.tab, message.hasDirectMedia);
     case 'QUICK_DOWNLOAD':
       return handleQuickDownload(sender.tab, message.clicked, message.force === true);
     default:
@@ -262,11 +245,12 @@ async function handleGetTabState(requestedTabId?: number): Promise<GetTabStateRe
   const tabId = requestedTabId ?? (await activeTabId());
   if (tabId === undefined) return { ...EMPTY_TAB_STATE, tabId: -1 };
 
-  const state = await getTabState(tabId);
+  const generation = getTabGeneration(tabId);
   const freshPageInfo = await requestFreshPageInfo(tabId);
-  if (freshPageInfo) await setTabState(tabId, { ...state, pageInfo: freshPageInfo, updatedAt: Date.now() });
-
-  return { ...state, pageInfo: freshPageInfo ?? state.pageInfo, tabId };
+  const written = freshPageInfo
+    ? await updateTabState(tabId, (state) => ({ ...state, pageInfo: freshPageInfo, updatedAt: Date.now() }), generation)
+    : null;
+  return { ...(written ?? (await getTabState(tabId))), tabId };
 }
 
 async function activeTabId(): Promise<number | undefined> {
@@ -286,8 +270,7 @@ async function requestFreshPageInfo(tabId: number): Promise<PageInfo | null> {
 
 async function handlePageInfo(tabId: number | undefined, pageInfo: PageInfo): Promise<{ ok: boolean }> {
   if (tabId === undefined) return { ok: false };
-  const state = await getTabState(tabId);
-  await setTabState(tabId, { ...state, pageInfo, updatedAt: Date.now() });
+  await updateTabState(tabId, (state) => ({ ...state, pageInfo, updatedAt: Date.now() }));
   return { ok: true };
 }
 
@@ -296,12 +279,14 @@ async function handlePickedElement(
   message: Extract<BackgroundRequest, { type: 'PICKED_ELEMENT' }>,
 ): Promise<{ ok: boolean }> {
   if (tabId === undefined) return { ok: false };
-  const state = await getTabState(tabId);
-  const correlated = correlatePickedElement(message.element, state.candidates);
-  const candidates = correlated ? dedupeCandidates([...state.candidates, correlated]) : state.candidates;
-  await setTabState(tabId, { ...state, candidates, pickedElement: message.element, updatedAt: Date.now() });
-  await refreshBadgeIfActive(tabId, candidates.length);
-  broadcastTabStateUpdated(tabId, candidates.length);
+  const written = await updateTabState(tabId, (state) => {
+    const correlated = correlatePickedElement(message.element, state.candidates);
+    const candidates = correlated ? dedupeCandidates([...state.candidates, correlated]) : state.candidates;
+    return { ...state, candidates, pickedElement: message.element, updatedAt: Date.now() };
+  });
+  if (!written) return { ok: true };
+  await refreshBadgeIfActive(tabId, written.candidates.length);
+  broadcastTabStateUpdated(tabId, written.candidates.length);
   return { ok: true };
 }
 
@@ -318,7 +303,7 @@ async function handleSaveRule(
       notes: message.notes,
       source: message.source,
     });
-    await invalidateRulesCache();
+    await invalidateRules();
     return { ok: true, rule };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
@@ -326,17 +311,9 @@ async function handleSaveRule(
 }
 
 /**
- * Le content script ne fournit aucune donnée : l'onglet et son URL viennent de `sender`, jamais
- * de la page — sinon n'importe quel script de la page pourrait faire sonder une URL arbitraire.
+ * L'onglet et son URL viennent de `sender`, jamais de la page — sinon n'importe quel script de
+ * la page pourrait faire sonder une URL arbitraire. Le contenu de `clicked` est assaini en aval.
  */
-async function handleOverlayCheck(
-  tab: Browser.tabs.Tab | undefined,
-  hasDirectMedia: boolean,
-): Promise<OverlayCheckResponse> {
-  if (tab?.id === undefined || !tab.url) return { available: false };
-  return { available: await resolveOverlayAvailability(tab.id, tab.url, hasDirectMedia === true) };
-}
-
 async function handleQuickDownload(
   tab: Browser.tabs.Tab | undefined,
   clicked: unknown,
@@ -344,13 +321,6 @@ async function handleQuickDownload(
 ): Promise<QuickDownloadResponse> {
   if (tab?.id === undefined || !tab.url) return { ok: false, error: 'Onglet introuvable.' };
   return runQuickDownload(tab.id, { url: tab.url, title: tab.title }, clicked, isForced);
-}
-
-/** Signale au content script qu'une source vient d'apparaître (flux sniffé après chargement). */
-function notifyOverlayAvailable(tabId: number): void {
-  browser.tabs.sendMessage(tabId, { type: 'OVERLAY_AVAILABLE' } satisfies ContentRequest).catch(() => {
-    // Pas de content script injecté sur cet onglet (page interne, extension rechargée) : normal.
-  });
 }
 
 function errorMessage(error: unknown): string {

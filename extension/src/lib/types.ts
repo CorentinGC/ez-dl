@@ -328,8 +328,10 @@ export interface TabState {
   candidates: MediaCandidate[];
   pageInfo: PageInfo | null;
   pickedElement: PickedElementInfo | null;
-  /** Absent tant qu'aucun probe n'a été déclenché pour l'overlay sur cet onglet. */
+  /** Absent tant qu'aucun probe n'a été déclenché (clic sur l'overlay) sur cet onglet. */
   quickProbe?: QuickProbeCache | null;
+  /** Dernière URL vue pour l'onglet : sert à repérer une navigation SPA sans `status: loading`. */
+  pageUrl?: string | null;
   updatedAt: number;
 }
 

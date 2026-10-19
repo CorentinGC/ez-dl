@@ -3,7 +3,7 @@
  * erreur serveur générique, ou aucune vidéo détectée (avec bouton d'apprentissage).
  */
 
-export type EmptyStateVariant = 'not-configured' | 'unauthorized' | 'network-error' | 'server-error' | 'no-sources';
+export type EmptyStateVariant = 'not-configured' | 'unauthorized' | 'network-error' | 'server-error' | 'no-sources' | 'listing';
 
 interface EmptyStateProps {
   variant: EmptyStateVariant;
@@ -28,6 +28,10 @@ const COPY: Record<EmptyStateVariant, { title: string; description: string }> = 
   'server-error': {
     title: 'Erreur serveur',
     description: 'Le serveur a renvoyé une erreur inattendue.',
+  },
+  listing: {
+    title: 'Page de liste',
+    description: 'Page de liste : ouvrez une vidéo.',
   },
   'no-sources': {
     title: 'Aucune vidéo détectée',

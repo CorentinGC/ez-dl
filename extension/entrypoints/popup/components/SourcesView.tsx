@@ -93,6 +93,7 @@ function errorToVariant(error: SourcesError | null): EmptyStateVariant | null {
   if (!error) return null;
   if (error.kind === 'unauthorized') return 'unauthorized';
   if (error.kind === 'network') return 'network-error';
+  if (error.kind === 'listing') return 'listing';
   return 'server-error';
 }
 

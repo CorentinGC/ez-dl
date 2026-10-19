@@ -342,12 +342,35 @@ function hostnameMatchesDomain(hostname: string, domain: string): boolean {
   return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
+/** Règle de site dont le pattern est déjà compilé : à construire une fois, pas à chaque requête. */
+export interface CompiledSiteRule {
+  domain: string;
+  pattern: RegExp;
+}
+
+/** Compile les patterns des règles ; une règle dont le pattern ne compile pas est ignorée. */
+export function compileSiteRules(rules: SiteRule[]): CompiledSiteRule[] {
+  const compiled: CompiledSiteRule[] = [];
+  for (const rule of rules) {
+    try {
+      compiled.push({ domain: rule.domain, pattern: patternToRegExp(rule.url_pattern) });
+    } catch {
+      // Pattern invalide : la règle est ignorée plutôt que de casser tout le sniffing.
+    }
+  }
+  return compiled;
+}
+
 /**
  * Applique les règles de site apprises à des requêtes réseau brutes pour reconnaître des
  * flux qui ne matchent pas les patterns génériques (extension/content-type). Une requête
  * ne peut produire qu'un seul candidat "learned" (la première règle qui matche gagne).
  */
 export function applySiteRules(requests: RawRequest[], rules: SiteRule[]): MediaCandidate[] {
+  return applyCompiledSiteRules(requests, compileSiteRules(rules));
+}
+
+export function applyCompiledSiteRules(requests: RawRequest[], rules: CompiledSiteRule[]): MediaCandidate[] {
   if (rules.length === 0) return [];
   const candidates: MediaCandidate[] = [];
   for (const request of requests) {
@@ -358,7 +381,7 @@ export function applySiteRules(requests: RawRequest[], rules: SiteRule[]): Media
       continue;
     }
     const matchedRule = rules.find(
-      (rule) => hostnameMatchesDomain(hostname, rule.domain) && patternToRegExp(rule.url_pattern).test(request.url),
+      (rule) => hostnameMatchesDomain(hostname, rule.domain) && rule.pattern.test(request.url),
     );
     if (!matchedRule) continue;
     candidates.push({

@@ -6,6 +6,7 @@
  *   aucun état critique ne doit rester uniquement en mémoire du module).
  */
 
+import { createTabStateGuard } from './tabStateGuard';
 import type { SiteRule, TabState } from './types';
 
 const TAB_STATE_PREFIX = 'tabState:';
@@ -19,6 +20,7 @@ export const EMPTY_TAB_STATE: TabState = {
   pageInfo: null,
   pickedElement: null,
   quickProbe: null,
+  pageUrl: null,
   updatedAt: 0,
 };
 
@@ -44,34 +46,60 @@ export async function getTabState(tabId: number): Promise<TabState> {
   return stored[key] ?? EMPTY_TAB_STATE;
 }
 
-export async function setTabState(tabId: number, state: TabState): Promise<void> {
-  await browser.storage.session.set({ [tabStateKey(tabId)]: state });
+/** Garde partagé par tout le worker : sérialise les écritures d'un onglet et invalide les périmées. */
+const tabStateGuard = createTabStateGuard();
+
+/** Génération courante d'un onglet : à capturer au début d'une opération qui écrira plus tard. */
+export function getTabGeneration(tabId: number): number {
+  return tabStateGuard.generationOf(tabId);
 }
 
+/**
+ * Lecture -> modification -> écriture atomique de l'état d'un onglet. `updater` renvoie le nouvel
+ * état, ou `null` pour ne rien écrire. Retourne l'état écrit, `null` si rien n'a été écrit ou si
+ * l'opération est périmée (`generation` ne correspond plus : onglet purgé entre-temps).
+ */
+export async function updateTabState(
+  tabId: number,
+  updater: (state: TabState) => TabState | null,
+  generation: number = tabStateGuard.generationOf(tabId),
+): Promise<TabState | null> {
+  return tabStateGuard.run(tabId, async () => {
+    if (tabStateGuard.generationOf(tabId) !== generation) return null;
+    const next = updater(await getTabState(tabId));
+    if (!next) return null;
+    await browser.storage.session.set({ [tabStateKey(tabId)]: next });
+    return next;
+  });
+}
+
+/** Purge l'état d'un onglet : les écritures en file ou en vol de l'ancienne génération sont abandonnées. */
 export async function clearTabState(tabId: number): Promise<void> {
-  await browser.storage.session.remove(tabStateKey(tabId));
+  tabStateGuard.invalidate(tabId);
+  await tabStateGuard.run(tabId, () => browser.storage.session.remove(tabStateKey(tabId)));
 }
 
 // ---------------------------------------------------------------------------
 // Cache des règles de site apprises (rafraîchi via GET /api/rules)
 // ---------------------------------------------------------------------------
 
-interface RulesCacheEntry {
+export interface RulesCacheEntry {
   rules: SiteRule[];
   expiresAt: number;
 }
 
-/** Retourne les règles en cache si encore valides, `null` sinon (cache absent ou expiré). */
-export async function getCachedRules(): Promise<SiteRule[] | null> {
+/** Retourne l'entrée en cache si encore valide, `null` sinon (cache absent ou expiré). */
+export async function getCachedRules(): Promise<RulesCacheEntry | null> {
   const stored = await browser.storage.session.get<Record<string, RulesCacheEntry>>(RULES_CACHE_KEY);
   const entry = stored[RULES_CACHE_KEY];
   if (!entry || entry.expiresAt < Date.now()) return null;
-  return entry.rules;
+  return entry;
 }
 
-export async function setCachedRules(rules: SiteRule[], ttlMs = RULES_CACHE_TTL_MS): Promise<void> {
+export async function setCachedRules(rules: SiteRule[], ttlMs = RULES_CACHE_TTL_MS): Promise<RulesCacheEntry> {
   const entry: RulesCacheEntry = { rules, expiresAt: Date.now() + ttlMs };
   await browser.storage.session.set({ [RULES_CACHE_KEY]: entry });
+  return entry;
 }
 
 export async function invalidateRulesCache(): Promise<void> {

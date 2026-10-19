@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyCompiledSiteRules,
   applySiteRules,
+  compileSiteRules,
   classifyUrl,
   collapseVariantPlaylists,
   correlatePickedElement,
@@ -222,6 +224,39 @@ describe('applySiteRules', () => {
 
   it('retourne un tableau vide sans règles', () => {
     expect(applySiteRules([{ url: 'https://video.example.com/stream/abc.bin', tabId: 1 }], [])).toEqual([]);
+  });
+});
+
+describe('compileSiteRules / applyCompiledSiteRules', () => {
+  const rule: SiteRule = {
+    id: 'r1',
+    domain: 'video.example.com',
+    url_pattern: 'https://video.example.com/stream/*.bin',
+    label: null,
+    notes: null,
+    source: 'learned',
+    created_at: '2026-01-01T00:00:00Z',
+  };
+
+  it('compile le pattern une fois et l\'applique à plusieurs requêtes', () => {
+    const compiled = compileSiteRules([rule]);
+    expect(compiled).toHaveLength(1);
+    const requests: RawRequest[] = [
+      { url: 'https://video.example.com/stream/a.bin', tabId: 1 },
+      { url: 'https://video.example.com/stream/b.bin', tabId: 1 },
+      { url: 'https://video.example.com/autre.txt', tabId: 1 },
+    ];
+    expect(applyCompiledSiteRules(requests, compiled).map((c) => c.url)).toEqual([
+      'https://video.example.com/stream/a.bin',
+      'https://video.example.com/stream/b.bin',
+    ]);
+  });
+
+  it('ignore une regex invalide sans lever (repli glob) et garde les autres règles', () => {
+    const broken: SiteRule = { ...rule, id: 'r2', url_pattern: '(' };
+    const compiled = compileSiteRules([broken, rule]);
+    expect(compiled.length).toBeGreaterThanOrEqual(1);
+    expect(() => applyCompiledSiteRules([{ url: 'https://video.example.com/stream/a.bin', tabId: 1 }], compiled)).not.toThrow();
   });
 });
 

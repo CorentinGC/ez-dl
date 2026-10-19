@@ -4,7 +4,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApiClient, errorMessageFromBody, parseJobFrame, splitSseFrames } from './api';
+import { PROBE_TIMEOUT_MS, createApiClient, errorMessageFromBody, parseJobFrame, splitSseFrames } from './api';
 
 const JOB_JSON = '{"id":"j1","url":"https://example.com/v.mp4","title":null,"filename":"v.mp4","folder":"/data","status":"downloading","progress":42,"speed":null,"eta":null,"size":null,"error":null,"preset_id":"copy","format_id":null,"created_at":"2026-01-01T00:00:00","updated_at":"2026-01-01T00:00:01"}';
 
@@ -304,5 +304,72 @@ describe('createApiClient().lookupExistingJob', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })));
 
     await expect(createApiClient(config).lookupExistingJob({ url: 'https://example.com/v.mp4' })).rejects.toThrow();
+  });
+});
+
+describe('createApiClient() — annulation et fin de flux', () => {
+  const config = { baseUrl: 'http://localhost:8000', password: 'secret' };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  /** fetch qui ne se résout jamais, mais rejette en `AbortError` quand son signal est annulé. */
+  function stubHangingFetch(): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        });
+      }),
+    );
+  }
+
+  it('annule le probe quand le signal externe est annulé (démontage de la popup)', async () => {
+    stubHangingFetch();
+    const controller = new AbortController();
+    const pending = createApiClient(config).probe('https://example.com/v', { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'NetworkError', message: 'Requête annulée.' });
+  });
+
+  it('refuse de lancer un fetch si le signal est déjà annulé', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(createApiClient(config).probe('https://example.com/v', { signal: controller.signal })).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('laisse 35 s à un probe avant le timeout (10 s pour les autres appels)', async () => {
+    vi.useFakeTimers();
+    stubHangingFetch();
+    const probe = createApiClient(config).probe('https://example.com/v');
+    const settled = vi.fn();
+    probe.catch(settled);
+
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS - 1);
+    expect(settled).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(probe).rejects.toMatchObject({ message: 'Délai dépassé en contactant le serveur.' });
+  });
+
+  it('signale la fin normale du flux SSE sans fermeture volontaire', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 200 })));
+    const onError = vi.fn();
+    createApiClient(config).streamJobEvents(() => undefined, onError);
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+  });
+
+  it('ne signale rien quand le flux est fermé volontairement', async () => {
+    stubHangingFetch();
+    const onError = vi.fn();
+    const stop = createApiClient(config).streamJobEvents(() => undefined, onError);
+    stop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onError).not.toHaveBeenCalled();
   });
 });

@@ -2,47 +2,29 @@
  * Téléchargement en un clic déclenché par le bouton en overlay de la page.
  *
  * Vit côté **service worker** : lui seul peut lire les cookies et joindre le serveur avec le mot
- * de passe. Le content script n'obtient jamais qu'un booléen de disponibilité puis un résultat de
- * job — ni URL de serveur, ni mot de passe, ni cookies ne traversent la frontière de la page.
+ * de passe. Le content script n'obtient jamais qu'un résultat de job — ni URL de serveur, ni mot
+ * de passe, ni cookies ne traversent la frontière de la page.
+ *
+ * Le serveur n'est sollicité (probe, cookies éventuels) qu'**au clic** : aucune requête
+ * n'est émise en arrière-plan pour une page simplement visitée.
  *
  * Extrait de `background.ts` pour garder le service worker sous le seuil de 400 LOC.
  */
 
-import { createApiClient, toApiConfig } from './api';
+import { createApiClient, NetworkError, toApiConfig } from './api';
 import { readCookiesForUrl } from './cookies';
+import { isListingUrl } from './listingUrl';
 import type { QuickDownloadResponse } from './messaging';
 import { pickQuickSource, resolveDefaultFolder, sanitizeClickedVideo, type ClickedVideo } from './quickSource';
-import { getSettings, getTabState, isServerConfigured, setTabState } from './storage';
+import { createSingleFlight, probeFlightKey } from './singleFlight';
+import { getSettings, getTabGeneration, getTabState, isServerConfigured, updateTabState } from './storage';
 import type { ExtensionSettings, ProbeResponse, QuickProbeCache, TabState } from './types';
-import { getUiPrefs } from './uiPrefs';
-
-/** Probes en vol par onglet : les iframes d'une même page interrogent toutes le background. */
-const probesInFlight = new Map<number, Promise<QuickProbeCache>>();
 
 /**
- * Une source est-elle téléchargeable sur cet onglet ? Le probe serveur n'est tenté qu'en dernier
- * recours (aucun flux sniffé), une seule fois par URL d'onglet grâce au cache d'état d'onglet.
+ * Probes en vol, par onglet **et** URL : les iframes d'une même page interrogent toutes le
+ * background, mais après une navigation SPA le probe de la vidéo A ne doit pas servir la vidéo B.
  */
-export async function resolveOverlayAvailability(
-  tabId: number,
-  tabUrl: string,
-  hasDirectMedia: boolean,
-): Promise<boolean> {
-  const prefs = await getUiPrefs();
-  if (!prefs.showPageOverlay) return false;
-
-  const settings = await getSettings();
-  if (!isServerConfigured(settings) || !isProbeableUrl(tabUrl)) return false;
-
-  // Une vidéo qui expose son URL média est téléchargeable telle quelle : ni probe, ni sniffer.
-  if (hasDirectMedia) return true;
-
-  const state = await getTabState(tabId);
-  if (state.candidates.length > 0) return true;
-
-  const cache = await getOrRefreshProbe(tabId, tabUrl, state, settings);
-  return cache.probe !== null;
-}
+const probeFlight = createSingleFlight<QuickProbeCache>();
 
 /** Crée le job correspondant au clic sur le bouton : meilleure qualité et réglages par défaut. */
 export async function runQuickDownload(
@@ -115,6 +97,8 @@ async function resolveProbe(
   // reste le meilleur chemin (qualités séparées, piste audio à réassembler).
   if (clicked?.mediaUrl && !clicked.isOnlyVideo) return null;
   if (state.candidates.length > 0) return null;
+  // Page de liste : rien à sonder (le serveur répondrait « ouvrez une vidéo »).
+  if (isListingUrl(tabUrl)) return null;
   return (await getOrRefreshProbe(tabId, tabUrl, state, settings)).probe;
 }
 
@@ -126,12 +110,7 @@ async function getOrRefreshProbe(
 ): Promise<QuickProbeCache> {
   if (isCacheFresh(state.quickProbe, tabUrl)) return state.quickProbe as QuickProbeCache;
 
-  const inFlight = probesInFlight.get(tabId);
-  if (inFlight) return inFlight;
-
-  const pending = probeAndCache(tabId, tabUrl, settings).finally(() => probesInFlight.delete(tabId));
-  probesInFlight.set(tabId, pending);
-  return pending;
+  return probeFlight.run(probeFlightKey(tabId, tabUrl), () => probeAndCache(tabId, tabUrl, settings));
 }
 
 function isCacheFresh(cache: QuickProbeCache | null | undefined, tabUrl: string): boolean {
@@ -139,23 +118,32 @@ function isCacheFresh(cache: QuickProbeCache | null | undefined, tabUrl: string)
 }
 
 async function probeAndCache(tabId: number, tabUrl: string, settings: ExtensionSettings): Promise<QuickProbeCache> {
-  const cache: QuickProbeCache = { url: tabUrl, probe: await probeTab(tabUrl, settings), checkedAt: Date.now() };
-  // Relecture de l'état : le sniffer a pu ajouter des candidats pendant l'appel serveur.
-  const fresh = await getTabState(tabId);
-  await setTabState(tabId, { ...fresh, quickProbe: cache });
+  // Génération capturée avant l'appel serveur : si l'onglet est purgé entre-temps (navigation,
+  // fermeture), l'écriture du résultat est abandonnée au lieu de ressusciter l'état.
+  const generation = getTabGeneration(tabId);
+  const outcome = await probeTab(tabUrl, settings);
+  const cache: QuickProbeCache = { url: tabUrl, probe: outcome.probe, checkedAt: Date.now() };
+  // Un timeout ou un réseau coupé n'est pas un verdict : ne jamais mémoriser « indisponible ».
+  if (outcome.isDefinitive) await updateTabState(tabId, (state) => ({ ...state, quickProbe: cache }), generation);
   return cache;
 }
 
-async function probeTab(tabUrl: string, settings: ExtensionSettings): Promise<ProbeResponse | null> {
+interface ProbeOutcome {
+  probe: ProbeResponse | null;
+  /** `false` si l'échec est transitoire (timeout, abort, serveur injoignable) : à ne pas mettre en cache. */
+  isDefinitive: boolean;
+}
+
+async function probeTab(tabUrl: string, settings: ExtensionSettings): Promise<ProbeOutcome> {
   try {
     const client = createApiClient(toApiConfig(settings));
     const probe = settings.sendCookies
       ? await client.probeWithContext(tabUrl, { cookies: await readCookiesForUrl(tabUrl), referer: tabUrl })
       : await client.probe(tabUrl);
-    return probe.formats.length > 0 ? probe : null;
-  } catch {
-    // Page sans extracteur, serveur injoignable, 401… : pas de bouton, et pas de bruit console.
-    return null;
+    return { probe: probe.formats.length > 0 ? probe : null, isDefinitive: true };
+  } catch (error) {
+    // Page sans extracteur, 401… : verdict définitif, pas de bruit console. Réseau/timeout : à retenter.
+    return { probe: null, isDefinitive: !(error instanceof NetworkError) };
   }
 }
 

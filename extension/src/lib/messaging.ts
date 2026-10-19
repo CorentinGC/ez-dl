@@ -73,27 +73,8 @@ export interface PickerCancelledMessage {
 }
 
 /**
- * Le content script a repéré une vidéo exploitable et demande si la page offre une source
- * téléchargeable. Aucune donnée de la page n'est transmise : le background ne fait confiance
- * qu'à `sender.tab` (identifiant et URL réels de l'onglet).
- */
-export interface OverlayCheckRequest {
-  type: 'OVERLAY_CHECK';
-  /**
-   * Au moins une vidéo de la page expose une URL média directe : elle est téléchargeable telle
-   * quelle, le background peut répondre sans dépenser un probe serveur.
-   */
-  hasDirectMedia: boolean;
-}
-
-export interface OverlayCheckResponse {
-  /** `true` seulement si un flux sniffé ou un probe exploitable existe **et** que le serveur
-   * est configuré **et** que la préférence `showPageOverlay` est active. */
-  available: boolean;
-}
-
-/**
- * Clic sur le bouton en overlay : crée un job avec tous les réglages par défaut.
+ * Clic sur le bouton en overlay : crée un job avec tous les réglages par défaut. C'est le seul
+ * moment où le serveur est sondé (et les cookies lus) pour une vidéo de page.
  *
  * `clicked` décrit l'élément `<video>` réellement cliqué — indispensable dès qu'une page en
  * contient plusieurs. Ces champs viennent de la page : le background les fait passer par
@@ -132,14 +113,6 @@ export interface GetPageInfoMessage {
   type: 'GET_PAGE_INFO';
 }
 
-/**
- * Une source vient d'apparaître sur l'onglet (flux sniffé après le chargement) : le content
- * script peut afficher son bouton sans re-interroger le background.
- */
-export interface OverlayAvailableMessage {
-  type: 'OVERLAY_AVAILABLE';
-}
-
 // ---------------------------------------------------------------------------
 // Background -> popup/options (broadcast best-effort)
 // ---------------------------------------------------------------------------
@@ -164,15 +137,13 @@ export type BackgroundRequest =
   | PageInfoMessage
   | PickedElementMessage
   | PickerCancelledMessage
-  | OverlayCheckRequest
   | QuickDownloadRequest;
 
 /** Messages reçus par le content script. */
 export type ContentRequest =
   | ActivatePickerMessage
   | DeactivatePickerMessage
-  | GetPageInfoMessage
-  | OverlayAvailableMessage;
+  | GetPageInfoMessage;
 
 /** Messages diffusés par le background vers les pages d'extension ouvertes. */
 export type ExtensionBroadcast = TabStateUpdatedMessage;

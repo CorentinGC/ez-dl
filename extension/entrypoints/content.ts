@@ -5,7 +5,7 @@
  * annuler).
  */
 
-import { markOverlayAvailable, mountVideoOverlay, setOverlaySuspended, unmountVideoOverlay } from '@/src/content/videoOverlay';
+import { mountVideoOverlay, setOverlaySuspended, unmountVideoOverlay } from '@/src/content/videoOverlay';
 import type { ContentRequest, PageInfoMessage, PickedElementMessage, PickerCancelledMessage } from '@/src/lib/messaging';
 import type { PageInfo, PickedElementInfo } from '@/src/lib/types';
 import { getUiPrefs, watchUiPrefs } from '@/src/lib/uiPrefs';
@@ -24,7 +24,9 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       handleMessage(message as ContentRequest, sendResponse);
-      return true; // réponse potentiellement asynchrone (aucune ici, mais on garde le contrat).
+      // Toutes les réponses sont envoyées de façon synchrone : ne pas garder le canal ouvert
+      // (sinon un message sans réponse laisse l'expéditeur en attente jusqu'à la fermeture).
+      return false;
     });
   },
 });
@@ -42,10 +44,8 @@ function handleMessage(message: ContentRequest, sendResponse: (response?: unknow
     case 'GET_PAGE_INFO':
       sendResponse({ pageInfo: extractPageInfo() });
       return;
-    case 'OVERLAY_AVAILABLE':
-      markOverlayAvailable();
-      sendResponse({ ok: true });
-      return;
+    default:
+      return; // message inconnu : pas de réponse
   }
 }
 

@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type ApiClient, createApiClient, toApiConfig } from '@/src/lib/api';
 import { isActive } from '@/src/lib/jobStatus';
-import { isServerConfigured } from '@/src/lib/storage';
 import type { ExtensionSettings, Job } from '@/src/lib/types';
 import { readCookiesForUrl } from '@/src/lib/cookies';
 
@@ -37,17 +36,21 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
   const [actionError, setActionError] = useState<string | null>(null);
   const clientRef = useRef<ApiClient | null>(null);
   const sendCookies = settings?.sendCookies ?? false;
+  // Primitives plutôt que l'objet `settings` : son identité change à chaque écriture du storage,
+  // ce qui referait un abonnement SSE complet (et un double flux) sans changement de serveur.
+  const serverUrl = settings?.serverUrl ?? '';
+  const password = settings?.password ?? '';
 
   useEffect(() => {
     // Changement de serveur : la liste affichée appartient au serveur précédent, la garder
     // ferait cohabiter les jobs de deux machines jusqu'au premier rafraîchissement.
     setJobsById(new Map());
     setActionError(null);
-    if (!settings || !isServerConfigured(settings)) {
+    if (!serverUrl.trim() || !password.trim()) {
       setConnectionMode('idle');
       return;
     }
-    const client = createApiClient(toApiConfig(settings));
+    const client = createApiClient(toApiConfig({ serverUrl, password }));
     clientRef.current = client;
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -84,7 +87,7 @@ export function useJobs(settings: ExtensionSettings | null): UseJobsResult {
       stopStream?.();
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, [settings]);
+  }, [serverUrl, password]);
 
   const applyJob = useCallback((job: Job) => setJobsById((prev) => new Map(prev).set(job.id, job)), []);
 

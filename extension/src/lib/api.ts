@@ -31,6 +31,12 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/**
+ * Un probe peut durer jusqu'au timeout serveur (25 s) : le client attend 35 s (marge réseau)
+ * au lieu d'abandonner à 10 s pendant que le serveur continue à travailler pour rien.
+ */
+export const PROBE_TIMEOUT_MS = 35_000;
+
 /** La vérification de mise à jour est accessoire : elle ne doit pas retarder l'ouverture de la popup. */
 const UPDATE_CHECK_TIMEOUT_MS = 4_000;
 
@@ -121,7 +127,12 @@ async function request<T>(config: ApiClientConfig, path: string, init: RequestIn
   const base = normalizeBaseUrl(config.baseUrl);
   if (!base) throw new NetworkError('URL du serveur non configurée.');
 
+  // Signal externe (démontage de la popup…) combiné au timeout : l'un ou l'autre annule le fetch.
+  const externalSignal = init.signal ?? null;
+  if (externalSignal?.aborted) throw new NetworkError('Requête annulée.');
   const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   const headers = new Headers(init.headers);
@@ -133,11 +144,12 @@ async function request<T>(config: ApiClientConfig, path: string, init: RequestIn
     response = await fetch(`${base}${path}`, { ...init, headers, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new NetworkError('Délai dépassé en contactant le serveur.');
+      throw new NetworkError(externalSignal?.aborted ? 'Requête annulée.' : 'Délai dépassé en contactant le serveur.');
     }
     throw new NetworkError();
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 
   if (response.status === 401) throw new UnauthorizedError();
@@ -206,6 +218,9 @@ function streamJobEvents(
           if (job) onJob(job);
         }
       }
+      // Fin normale du flux (redémarrage serveur, proxy qui coupe) sans fermeture volontaire :
+      // l'appelant doit le savoir pour se rabattre sur le polling.
+      if (!controller.signal.aborted) onError?.(new NetworkError('Flux de suivi des jobs interrompu.'));
     } catch (error) {
       if (controller.signal.aborted) return; // fermeture volontaire (unsubscribe) : pas une erreur
       onError?.(error instanceof ApiError ? error : new NetworkError());
@@ -213,6 +228,16 @@ function streamJobEvents(
   })();
 
   return () => controller.abort();
+}
+
+/** Options communes aux appels annulables. */
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+/** Config d'un appel probe : timeout long, sauf si l'appelant en a imposé un. */
+function probeConfig(config: ApiClientConfig): ApiClientConfig {
+  return { ...config, timeoutMs: config.timeoutMs ?? PROBE_TIMEOUT_MS };
 }
 
 /** Construit un client HTTP lié à une configuration serveur (URL + mot de passe) donnée. */
@@ -231,14 +256,18 @@ export function createApiClient(config: ApiClientConfig) {
       request<PublishedExtension>({ ...config, timeoutMs: UPDATE_CHECK_TIMEOUT_MS }, '/extension/version'),
 
     /** Sonde une URL sans contexte d'authentification (page publique). */
-    probe: (url: string) => request<ProbeResponse>(config, `/api/probe?url=${encodeURIComponent(url)}`),
+    probe: (url: string, options: RequestOptions = {}) =>
+      request<ProbeResponse>(probeConfig(config), `/api/probe?url=${encodeURIComponent(url)}`, {
+        signal: options.signal,
+      }),
 
     /** Sonde une URL avec cookies/headers/referer (page authentifiée). L'URL voyage dans le
      * corps : la variante POST du serveur ne lit pas la query. */
-    probeWithContext: (url: string, context: Omit<ProbeRequestBody, 'url'>) =>
-      request<ProbeResponse>(config, '/api/probe', {
+    probeWithContext: (url: string, context: Omit<ProbeRequestBody, 'url'>, options: RequestOptions = {}) =>
+      request<ProbeResponse>(probeConfig(config), '/api/probe', {
         method: 'POST',
         body: JSON.stringify({ url, ...context } satisfies ProbeRequestBody),
+        signal: options.signal,
       }),
 
     listFolders: (path?: string) =>
