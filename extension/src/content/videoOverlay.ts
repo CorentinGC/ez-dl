@@ -55,15 +55,13 @@ export function mountVideoOverlay(): void {
   if (state || !document.body) return;
 
   const host = document.createElement('div');
-  // `position:fixed` + `pointer-events:none` : l'hôte couvre l'écran sans jamais intercepter un
-  // clic destiné à la page ; seuls les boutons réactivent les événements.
-  host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
+  applyHostPositioning(host, false);
 
   const shadow = host.attachShadow({ mode: 'open' });
   shadow.appendChild(buildOverlayStyle());
   const toast = buildToast();
   shadow.appendChild(toast);
-  document.body.appendChild(host);
+  document.documentElement.appendChild(host);
 
   const observer = new MutationObserver(() => scheduleSync());
   observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -103,6 +101,27 @@ export function setOverlaySuspended(suspended: boolean): void {
   if (!state) return;
   state.suspended = suspended;
   scheduleSync();
+}
+
+/**
+ * Ancre l'hôte (`pointer-events:none` : il n'intercepte jamais un clic destiné à la page ; seuls
+ * les boutons réactivent les événements).
+ *
+ * Hors plein écran : `position:absolute` à l'origine du document, boutons placés en coordonnées
+ * document. Le scroll de la page est réalisé par le compositeur et l'événement `scroll` arrive au
+ * moins une frame plus tard : un hôte `fixed` repositionné en JS suivait donc la vidéo en retard
+ * (ez-dl-blo). Ancrés au document, les boutons défilent avec elle sans aucun recalcul.
+ * En plein écran (top layer, pas de scroll) : `position:fixed` sur l'élément plein écran.
+ */
+function applyHostPositioning(host: HTMLElement, isFullscreen: boolean): void {
+  const placement = isFullscreen ? 'position:fixed;inset:0;' : 'position:absolute;top:0;left:0;width:0;height:0;';
+  host.style.cssText = `${placement}overflow:visible;z-index:2147483646;pointer-events:none;`;
+}
+
+/** Décalage viewport → coordonnées de l'hôte (nul en plein écran, où l'hôte est `fixed`). */
+function hostScrollOffset(): { x: number; y: number } {
+  if (document.fullscreenElement) return { x: 0, y: 0 };
+  return { x: window.scrollX, y: window.scrollY };
 }
 
 function listen(target: EventTarget, type: string, handler: EventListener, capture: boolean): void {
@@ -151,6 +170,7 @@ function findEligibleVideos(): HTMLVideoElement[] {
 function renderBadges(videos: HTMLVideoElement[]): void {
   if (!state) return;
   const viewport = { width: window.innerWidth, height: window.innerHeight };
+  const offset = hostScrollOffset();
   const visible = new Set(videos);
 
   for (const [video, badge] of state.badges) {
@@ -167,7 +187,9 @@ function renderBadges(videos: HTMLVideoElement[]): void {
       { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       viewport,
     );
-    badge.button.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+    // Coordonnées document : constantes pendant le scroll tant que la vidéo est entièrement
+    // visible ; seul le cas « collant » (vidéo coupée par le bord) dépend encore du recalcul.
+    badge.button.style.transform = `translate(${Math.round(left + offset.x)}px, ${Math.round(top + offset.y)}px)`;
     badge.button.style.display = 'flex';
   }
 }
@@ -202,8 +224,9 @@ function clearBadges(): void {
 /** Plein écran : l'hôte doit vivre dans le sous-arbre plein écran, seul rendu par le navigateur. */
 function onFullscreenChange(): void {
   if (!state) return;
-  const parent = document.fullscreenElement ?? document.body;
+  const parent = document.fullscreenElement ?? document.documentElement;
   if (state.host.parentNode !== parent) parent.appendChild(state.host);
+  applyHostPositioning(state.host, !!document.fullscreenElement);
   scheduleSync();
 }
 

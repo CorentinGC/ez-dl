@@ -56,7 +56,7 @@ export function buildOverlayStyle(): HTMLStyleElement {
   style.textContent = `
 :host { all: initial; }
 .ezdl-badge {
-  position: fixed; top: 0; left: 0; width: ${BADGE_SIZE}px; height: ${BADGE_SIZE}px;
+  position: absolute; top: 0; left: 0; width: ${BADGE_SIZE}px; height: ${BADGE_SIZE}px;
   display: none; align-items: center; justify-content: center;
   padding: 0; border: 0; border-radius: 50%; cursor: pointer; pointer-events: auto;
   background: rgba(17, 24, 39, .82); color: #f9fafb;
