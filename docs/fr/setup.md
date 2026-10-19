@@ -224,6 +224,12 @@ puis recharger l'extension depuis `chrome://extensions`.
 > **Réglages → Sauvegarde des réglages → Exporter**, puis **Importer** le fichier une fois
 > l'extension réinstallée. Le fichier contient les mots de passe en clair.
 
+Le zip servi par le serveur porte la **clé publique de signature du serveur** dans son
+`manifest.json` (champ `key`) : l'identifiant de l'extension est donc fixe — le même que celui du
+`.crx` signé, affiché sur la page `/extension` — quel que soit le dossier de décompression, et une
+réinstallation retrouve ses réglages. Seul le premier passage d'une installation antérieure (sans
+clé) vers un zip à clé change l'identifiant une dernière fois : exporter les réglages avant.
+
 > **Le glisser-déposer du `.crx` ne fonctionne pas.** Chrome rejette tout `.crx` déposé sur
 > `chrome://extensions` qui n'est pas signé par le Chrome Web Store, avec « Package incorrect
 > CRX_REQUIRED_PROOF_MISSING » — le Mode développeur n'y change rien. Aucun serveur auto-hébergé

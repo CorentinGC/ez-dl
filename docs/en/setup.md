@@ -221,6 +221,12 @@ extension from `chrome://extensions`.
 > then **Import** the file once the extension is reinstalled. The file contains passwords in
 > plain text.
 
+The zip served by the server carries the **server's signing public key** in its `manifest.json`
+(`key` field): the extension ID is therefore fixed — the same as the signed `.crx`, shown on the
+`/extension` page — whatever the unpack folder, and a reinstall finds its settings again. Only the
+first move from an older (keyless) install to a keyed zip changes the ID one last time: export
+the settings first.
+
 > **Drag-and-dropping the `.crx` does not work.** Chrome rejects any `.crx` dropped onto
 > `chrome://extensions` that is not signed by the Chrome Web Store, with "Package is invalid:
 > CRX_REQUIRED_PROOF_MISSING" — Developer mode changes nothing. No self-hosted server can produce

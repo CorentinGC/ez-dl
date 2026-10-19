@@ -272,3 +272,28 @@ def test_zip_route_refuses_a_symlinked_artifact(app_client, dist_dir, tmp_path):
     assert app_client.get("/extension/zip").status_code == 404
     assert app_client.get("/extension/download").status_code == 404
     assert app_client.get("/extension/version").json()["available"] is False
+
+
+def test_served_zip_pins_the_extension_id_of_the_signed_package(app_client, dist_dir):
+    """Le zip servi porte la clé du serveur : l'identifiant d'une installation non empaquetée
+    ne dépend plus du dossier et vaut celui annoncé par `/extension/version` (ez-dl-vjr)."""
+    import base64
+    import io
+    import json
+    import zipfile
+
+    from app.core import crx
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps({"name": "ez-dl", "version": VERSION}))
+    (dist_dir / ZIP_FILENAME).write_bytes(buffer.getvalue())
+    (dist_dir / VERSION_FILENAME).write_text(f"{VERSION}\n")
+
+    served = app_client.get("/extension/zip")
+    announced = app_client.get("/extension/version").json()
+
+    assert served.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(served.content)) as archive:
+        key = base64.b64decode(json.loads(archive.read("manifest.json"))["key"])
+    assert crx.extension_id(key) == announced["extension_id"]

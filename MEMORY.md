@@ -251,6 +251,10 @@ sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui
 
 ## Pièges / gotchas
 
+- **Extension non empaquetée sans `key` = identifiant dérivé du chemin du dossier** : supprimer
+  l'extension ou la recharger depuis un autre dossier vide `storage.local` (réglages perdus, vécu
+  le 2026-10-19). Le serveur injecte désormais sa clé publique dans le `manifest.json` du zip servi
+  (`server/app/core/keyed_zip.py`, ez-dl-vjr) ; export/import des réglages dans les options.
 - **`image.yml` appelé deux fois dans un même run CI** (edge puis release) : les artefacts de
   digests doivent avoir un nom propre à chaque appel (préfixe = ref), sinon l'index de la release
   fusionne les deux builds et le tag semver pointe sur l'image edge (v0.1.2 embarquait 0.1.1,

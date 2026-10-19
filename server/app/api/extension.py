@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from app.config import APP_VERSION, Settings, get_settings
-from app.core import crx
+from app.core import crx, keyed_zip
 from app.schemas import ExtensionVersionResponse
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,21 @@ def _zip_path(settings: Settings) -> Path | None:
     return candidate
 
 
+def _published_archive(settings: Settings) -> Path | None:
+    """Zip servi : celui de l'image avec la clé publique du serveur dans son manifeste
+    (identifiant d'extension fixe, cf. `core/keyed_zip.py`), le zip brut si le dossier de
+    données n'est pas inscriptible, `None` si l'image n'embarque pas l'extension."""
+    archive = _zip_path(settings)
+    if archive is None:
+        return None
+    try:
+        cache_dir = settings.data_dir / _CACHE_DIRNAME
+        return keyed_zip.build_keyed_zip(archive, cache_dir, settings.data_dir)
+    except OSError:
+        logger.warning("Clé non ajoutée au zip d'extension : zip brut servi", exc_info=True)
+        return archive
+
+
 def _published_version(settings: Settings) -> str | None:
     """Version écrite au build depuis `extension/package.json`, `None` si absente ou hors
     format numérique attendu."""
@@ -118,8 +133,8 @@ def _fingerprint(settings: Settings, signed: Path) -> tuple[str, str]:
     """Identifiant Chrome attendu et SHA-256 du `.crx` — les deux repères qui permettent de
     détecter un artefact substitué en chemin (installation en HTTP clair, tunnel hostile).
 
-    L'identifiant ne vaut que pour une installation du paquet SIGNÉ (politique système) : une
-    extension chargée non empaquetée reçoit un identifiant dérivé du chemin du dossier.
+    Le zip servi porte la même clé publique dans son manifeste : l'identifiant vaut aussi pour
+    une extension chargée non empaquetée depuis ce zip.
     """
     return crx.signing_identity(settings.data_dir), hashlib.sha256(signed.read_bytes()).hexdigest()
 
@@ -147,7 +162,7 @@ def _public_base(settings: Settings, request: Request) -> str:
 @router.get("/extension", response_class=HTMLResponse, include_in_schema=False)
 def install_page(request: Request, settings: Settings = Depends(get_settings)) -> HTMLResponse:
     """Page d'installation : téléchargement du zip et marche à suivre dans Chrome."""
-    archive = _zip_path(settings)
+    archive = _published_archive(settings)
     version = _published_version(settings) if archive else None
 
     if archive is None:
@@ -253,7 +268,7 @@ def download_crx(settings: Settings = Depends(get_settings)) -> FileResponse:
 
     Elle n'est PAS installable par glisser-déposer : voir `_signed_package_note`.
     """
-    archive = _zip_path(settings)
+    archive = _published_archive(settings)
     if archive is None:
         raise HTTPException(status_code=404, detail=_UNAVAILABLE_DETAIL)
 
@@ -278,7 +293,7 @@ def update_manifest(request: Request, settings: Settings = Depends(get_settings)
     la relit périodiquement, compare la version annoncée à celle de l'extension installée, et
     télécharge `codebase` quand elle a avancé.
     """
-    archive = _zip_path(settings)
+    archive = _published_archive(settings)
     if archive is None:
         raise HTTPException(status_code=404, detail=_UNAVAILABLE_DETAIL)
 
@@ -309,7 +324,7 @@ def update_manifest(request: Request, settings: Settings = Depends(get_settings)
 @router.get("/extension/zip", include_in_schema=False)
 def download_zip(settings: Settings = Depends(get_settings)) -> FileResponse:
     """Zip de l'extension, pour la voie « Charger l'extension non empaquetée »."""
-    archive = _zip_path(settings)
+    archive = _published_archive(settings)
     if archive is None:
         raise HTTPException(status_code=404, detail=_UNAVAILABLE_DETAIL)
 
@@ -323,7 +338,7 @@ def download_zip(settings: Settings = Depends(get_settings)) -> FileResponse:
 @router.get("/extension/version", response_model=ExtensionVersionResponse)
 def published_version(settings: Settings = Depends(get_settings)) -> ExtensionVersionResponse:
     """Version publiée, comparée par la popup à celle de l'extension installée."""
-    archive = _zip_path(settings)
+    archive = _published_archive(settings)
     if archive is None:
         return ExtensionVersionResponse(available=False)
 
