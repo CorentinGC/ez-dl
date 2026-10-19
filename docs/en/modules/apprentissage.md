@@ -24,21 +24,22 @@ on the page:
 - The selected element (tag, relevant attributes such as `src`/`currentSrc`, position in the DOM)
   is sent back to `background.ts` via a runtime message.
 
-## 2. Network correlation (`background.ts` + `lib/correlation.ts`)
+## 2. Network correlation (`background.ts` + `extension/src/lib/detection.ts`)
 
-The background script keeps a sliding buffer of the tab's recent network requests (coming from
-the same sniffer as automatic detection, see
-[modules/detection.md](detection.md#2-network-sniffing-extension)), stored in
-`chrome.storage.session` to survive a possible service worker wake-up.
+Correlation links the element picked through the DOM picker to a usable media URL. It receives the
+tab's recent candidates, coming from the same sniffer as automatic detection (see
+[modules/detection.md](detection.md#2-network-sniffing-extension)).
 
-`extension/lib/correlation.ts` cross-references the selected DOM element with this buffer:
+`correlatePickedElement` (`extension/src/lib/detection.ts`) applies, in this order:
 
-- direct match if the element exposes a `src`/`currentSrc` that matches a recent request;
-- failing that, a temporal heuristic: video/stream requests (same patterns as the automatic
-  sniffer) occurring within a time window close to the loading of / interaction with the selected
-  element;
-- if several candidates remain, the most likely URL(s) are presented to the user for confirmation
-  rather than silently chosen.
+- if the element itself carries a recognised media URL (`currentSrc`, falling back to `src`), it is
+  kept (source `picked`);
+- otherwise, the candidate most recently detected by the sniffer is kept: the best available
+  approximation, since the user has just clicked the player;
+- without an element or a candidate, there is no proposal.
+
+There is no time window and no silent choice among several candidates: the single result is shown to
+the user, who confirms or not (see section 3).
 
 ## 3. Proposal and confirmation
 

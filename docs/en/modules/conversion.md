@@ -5,7 +5,7 @@ based on the encoders actually available on the machine/container.
 
 ## Encoder detection
 
-At startup (`server/app/main.py`, lifespan), the `server/app/services/ffmpeg.py` service runs:
+At startup (`server/app/main.py`, lifespan), the `server/app/core/ffmpeg.py` service runs:
 
 ```
 ffmpeg -encoders
@@ -73,7 +73,7 @@ Implementation details: `ffmpeg-debian` / `ffmpeg-nvenc` stages in `server/Docke
 1. The job has a `preset_id` different from `copy` (or absent, with a default other than `copy`
    if configured on the extension side).
 2. After the download completes (`status: downloading` → done), the queue worker invokes
-   `server/app/services/ffmpeg.py` with the temporary file as input, an output file in
+   `server/app/core/ffmpeg.py` with the temporary file as input, an output file in
    `EZDL_TEMP_DIR`, and the preset's arguments.
 3. `status: converting` is published via SSE during execution.
 4. At the end, the converted file replaces the downloaded file for the `moving` step (move to
@@ -86,7 +86,7 @@ As with yt-dlp, every call to ffmpeg goes through `subprocess` with an **argumen
 
 ## Adding a preset
 
-1. Define the preset in `server/app/services/ffmpeg.py`: id, label, description, container, video
+1. Define the preset in `server/app/core/ffmpeg.py`: id, label, description, container, video
    codec (or `None` for an audio-only preset), list of ffmpeg arguments, and the id of the
    required ffmpeg encoder (used to filter via `ffmpeg -encoders`).
 2. Check that the chosen container is compatible with the codec (e.g. do not offer H.265 in a

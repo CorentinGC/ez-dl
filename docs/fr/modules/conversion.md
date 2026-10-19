@@ -5,7 +5,7 @@ démarrage du serveur en fonction des encodeurs réellement disponibles sur la m
 
 ## Détection des encodeurs
 
-Au démarrage (`server/app/main.py`, lifespan), le service `server/app/services/ffmpeg.py` exécute :
+Au démarrage (`server/app/main.py`, lifespan), le service `server/app/core/ffmpeg.py` exécute :
 
 ```
 ffmpeg -encoders
@@ -74,7 +74,7 @@ Détails d'implémentation : stages `ffmpeg-debian` / `ffmpeg-nvenc` de `server/
 1. Le job a un `preset_id` différent de `copy` (ou absent avec un défaut différent de `copy` si
    configuré côté extension).
 2. Après le téléchargement (`status: downloading` → terminé), le worker de la queue invoque
-   `server/app/services/ffmpeg.py` avec le fichier temporaire en entrée, un fichier de sortie dans
+   `server/app/core/ffmpeg.py` avec le fichier temporaire en entrée, un fichier de sortie dans
    `EZDL_TEMP_DIR`, et les arguments du preset.
 3. `status: converting` est publié via SSE pendant l'exécution.
 4. À la fin, le fichier converti remplace le fichier téléchargé pour l'étape `moving` (déplacement
@@ -87,7 +87,7 @@ jamais `shell=True` (voir [conventions.md](../conventions.md#sécurité)).
 
 ## Ajouter un preset
 
-1. Définir le preset dans `server/app/services/ffmpeg.py` : id, label, description, conteneur,
+1. Définir le preset dans `server/app/core/ffmpeg.py` : id, label, description, conteneur,
    codec vidéo (ou `None` pour un preset audio-only), liste d'arguments ffmpeg, et l'identifiant de
    l'encodeur ffmpeg requis (utilisé pour filtrer via `ffmpeg -encoders`).
 2. Vérifier que le conteneur choisi est compatible avec le codec (ex. ne pas proposer H.265 dans un

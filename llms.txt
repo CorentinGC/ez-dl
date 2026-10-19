@@ -7,9 +7,11 @@
 
 - [Architecture](docs/fr/architecture.md) : vue d'ensemble, flux de données, structure des
   dossiers, contrat d'API, modèle de données, cycle de vie d'un job.
-- [Setup](docs/fr/setup.md) : prérequis, install dev, variables d'environnement, `PUID`/`PGID`,
-  installation en une commande (`deploy/install.sh`), docker compose, chargement de l'extension et
-  permissions demandées, reverse proxy, mise à jour automatique du serveur, vérification.
+- [Setup](docs/fr/setup.md) : prérequis, install dev, variables d'environnement (dont `EZDL_PROXY`,
+  `EZDL_PROBE_TIMEOUT_SECONDS`, `EZDL_MEM_LIMIT`), `PUID`/`PGID`, installation en une commande
+  (`deploy/install.sh`), docker compose (garde-fous `init`/`mem_limit`/`pids_limit`), chargement de
+  l'extension et permissions demandées, reverse proxy, passage par un VPN/proxy (gluetun), mise à jour
+  automatique du serveur, vérification.
 - [FAQ](docs/fr/faq.md) : détection d'un site, propriétaire des fichiers, canaux `latest`/`edge`,
   NVENC, extension oubliée par Chrome.
 - [Conventions](docs/fr/conventions.md) : style de code, nommage, taille de fichiers, tests,
@@ -24,8 +26,12 @@
 - [ADR 0006 — Versionnement et canaux de publication](docs/fr/decisions/0006-versionnement-et-canaux-de-publication.md) :
   version unique lue depuis `pyproject.toml`, publication déclenchée par un tag git semver,
   image multi-arch amd64+arm64, `PUID`/`PGID` en réglage d'exécution. Amende l'ADR 0005.
-- [Module — Détection](docs/fr/modules/detection.md) : yt-dlp probe, filtrage/tri des formats,
-  sniffing réseau, règles apprises.
+- [ADR 0008 — Proxy de sortie global et probe borné](docs/fr/decisions/0008-proxy-sortie-global-et-probe-borne.md) :
+  règle playlist unique (422 sur page de liste), coordination des probes, arrêt du groupe de
+  process, `EZDL_PROXY` global à yt-dlp.
+- [Module — Détection](docs/fr/modules/detection.md) : yt-dlp probe (règle playlist, coordination),
+  filtrage/tri des formats, sniffing réseau, règles apprises, probe à la demande (popup et overlay),
+  overlay sans requête à l'affichage, X/Twitter (media id, permalink, rang), doublons.
 - [Module — Conversion](docs/fr/modules/conversion.md) : presets ffmpeg, détection des encodeurs.
 - [Module — Apprentissage](docs/fr/modules/apprentissage.md) : picker DOM, corrélation réseau,
   règles de site.
@@ -44,6 +50,7 @@
 - [ADR 0004 — Extension distribution as CRX](docs/en/decisions/0004-distribution-extension-crx.md)
 - [ADR 0005 — Auto-update through GHCR image + watchtower](docs/en/decisions/0005-auto-update-image-ghcr-watchtower.md)
 - [ADR 0006 — Versioning and release channels](docs/en/decisions/0006-versionnement-et-canaux-de-publication.md)
+- [ADR 0008 — Global outbound proxy and bounded probe](docs/en/decisions/0008-proxy-sortie-global-et-probe-borne.md)
 - [Module — Detection](docs/en/modules/detection.md)
 - [Module — Conversion](docs/en/modules/conversion.md)
 - [Module — Learning mode](docs/en/modules/apprentissage.md)

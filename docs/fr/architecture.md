@@ -72,7 +72,7 @@ server/
 │   ├── security.py          # dépendance FastAPI d'authentification (Bearer, constant-time)
 │   ├── models.py            # modèles SQLModel : Job, SiteRule
 │   ├── schemas.py           # schémas pydantic d'entrée/sortie des routes
-│   ├── db.py                 # engine SQLite, session, init des tables
+│   ├── db.py                 # engine SQLite, session, init des tables + migration additive (ADD COLUMN)
 │   ├── api/
 │   │   ├── health.py         # GET /api/health
 │   │   ├── capabilities.py   # GET /api/capabilities
@@ -84,16 +84,27 @@ server/
 │   ├── templates/
 │   │   └── extension.html    # page d'installation servie par GET /extension
 │   └── core/
-│       ├── ytdlp.py           # wrapper subprocess yt-dlp (probe, download, progression)
-│       ├── ffmpeg.py          # wrapper subprocess ffmpeg, détection des encodeurs, presets
-│       ├── queue.py           # file d'attente asyncio, workers, pipeline, pub/sub SSE
+│       ├── ytdlp.py           # wrapper subprocess yt-dlp (probe, download, progression, règle playlist)
+│       ├── probe_cache.py     # coordination des probes : 2 en parallèle, coalescing, cache 60 s
+│       ├── process.py         # sous-process : lancement en groupe dédié, arrêt du groupe, récolte
+│       ├── stderr_tail.py     # drainage concurrent du stderr (un pipe plein bloquerait le process)
+│       ├── progress.py        # progression yt-dlp → champs de job, cadence d'écriture (0,5 s)
+│       ├── broadcaster.py     # pub/sub SSE des jobs, file bornée par abonné (drop-oldest)
+│       ├── job_context.py     # contexte éphémère d'un job (cookies, headers, referer), jamais persisté
+│       ├── queue.py           # file d'attente asyncio, workers, pipeline
+│       ├── queue_recovery.py  # réconciliation base/disque au démarrage de la file
+│       ├── ffmpeg.py          # détection des encodeurs, presets, construction des arguments
+│       ├── convert.py         # conversion ffmpeg d'un fichier téléchargé, en sous-process borné
 │       ├── workdir.py         # dossier de travail d'un job : fichier produit, nom libre, move
 │       ├── paths.py           # résolution/validation des chemins vs EZDL_DOWNLOAD_ROOTS
 │       ├── crx.py             # packing CRX3 : clé RSA 2048 persistée, signature, cache
 │       └── cookies.py         # écriture du fichier cookies temporaire (0600), nettoyage
 └── tests/                    # pytest : auth, config, cookies, ffmpeg, paths, queue, ytdlp, crx,
-                              # routes jobs, folders et extension
+                              # routes jobs, folders, probe, process et extension
 ```
+
+Les réglages de proxy et de timeout de probe (`EZDL_PROXY`, `EZDL_PROBE_TIMEOUT_SECONDS`) sont
+décrits dans [setup.md](setup.md#variables-denvironnement).
 
 ### `extension/`
 
@@ -116,10 +127,24 @@ extension/
 │   ├── folders.ts              # logique pure de navigation dans l'arborescence des racines
 │   ├── profiles.ts             # profils de serveur : migration, CRUD, profil actif
 │   ├── storage.ts              # wrappers chrome.storage.local / chrome.storage.session
-│   ├── sniffer.ts              # patterns de détection réseau (extensions, content-types)
-│   └── correlation.ts          # corrélation picker DOM ↔ requêtes réseau (mode apprentissage)
-└── tests/                     # Vitest : patterns de détection, corrélation
+│   ├── detection.ts            # patterns d'URL (glob → regex), règles de détection
+│   ├── listingUrl.ts           # pages de liste (accueil, recherche, chaîne, timeline X) : aucun probe
+│   ├── twitterMedia.ts         # identifiant de média X, permalink, titre de tweet (fonctions pures)
+│   ├── tweetSource.ts          # source d'une vidéo de tweet : flux sniffé → probe du permalink → erreur
+│   ├── quickSource.ts          # ordre de priorité du téléchargement en un clic, assainissement du clic
+│   ├── quickDownload.ts        # téléchargement en un clic côté service worker (probe au clic, cache)
+│   ├── videoTitle.ts           # choix pur du titre d'une vidéo à partir des textes du DOM
+│   ├── overlayGeometry.ts      # taille minimale, visibilité et position du bouton overlay
+│   └── singleFlight.ts         # déduplication des requêtes en vol (probe par onglet et par URL)
+├── src/content/                # code injecté dans les pages (content script)
+│   ├── videoOverlay.ts         # un bouton par vidéo (Shadow DOM), suivi des <video>, toast
+│   ├── overlayElements.ts      # construction des éléments de l'overlay (styles, badge)
+│   ├── tweetContext.ts         # contexte « tweet » X lu dans le DOM (media id, permalink, rang)
+│   └── videoTitleDom.ts        # textes candidats autour d'une vidéo
+└── *.test.ts                   # tests Vitest colocalisés avec le code qu'ils couvrent
 ```
+
+Le bouton en overlay est détaillé dans [detection.md](modules/detection.md#bouton-de-téléchargement-en-overlay-page-visitée).
 
 #### Profils de serveur
 
@@ -270,16 +295,21 @@ elles sont ouvertes depuis la barre d'adresse d'un navigateur, qui ne sait pas j
 
 ```
 GET    /api/health          -> {status:"ok", version, ytdlp_version, ffmpeg_available}  [public]
-GET    /api/capabilities    -> {encoders:[{id,name,hwaccel,codec}], presets:[{id,label,description,container,video_codec,args_preview}]}
-GET    /api/probe?url=...   -> {url,title,uploader,duration,thumbnail,extractor,
+GET    /api/capabilities    -> {encoders:[{id,name,hwaccel,codec}], presets:[{id,label,description,container,video_codec,args_preview}],
+                                proxy_enabled}  (proxy_enabled = EZDL_PROXY défini ; l'URL n'est jamais exposée)
+GET    /api/probe?url=...&playlist_items=N -> {url,title,uploader,duration,thumbnail,extractor,
                                 formats:[{format_id,ext,height,width,fps,vcodec,acodec,filesize,tbr,label,has_audio,has_video}],
                                 best_format_id, suggested_filename}
-       (POST /api/probe accepte en plus {cookies, headers, referer} pour les pages authentifiées)
+       (POST /api/probe accepte en plus {cookies, headers, referer} pour les pages authentifiées ;
+       `playlist_items` (entier 1–50) se met en query en GET ou dans le corps en POST)
+       422 : page de liste (recherche, chaîne, playlist) sans `playlist_items` ou sans entrée
+       à ce rang — « ouvrez une vidéo ». 502 : erreur yt-dlp ou timeout. 499 : client parti.
 GET    /api/folders?path=   -> {roots:[{label,path,is_available,free_bytes,total_bytes}],
                                 current:{path,label,free_bytes,total_bytes}, entries:[{name,path,is_dir}], parent}
        (entries exclut les entrées cachées `.` et système — @eaDir, #recycle… ; naviguer dedans -> 400)
 POST   /api/folders         -> body {parent, name} -> 201 {name,path,is_dir}  (409 si déjà existant)
-POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?}
+POST   /api/jobs            -> body {url, format_id?, folder, filename?, preset_id?, cookies?, headers?, referer?, title?, playlist_items?}
+                               (`playlist_items` 1–50 : rang de la vidéo visée dans une page à plusieurs vidéos)
                             -> {job_id, status}
 GET    /api/jobs            -> [job]
 GET    /api/jobs/lookup     -> ?url=...&folder=...&filename=... -> {found, reason:"url"|"file"|null,
@@ -333,6 +363,7 @@ GET    /extension/version   -> {available, version, filename, size, extension_id
 | `error` | str? | Message d'erreur si `status == error` ; motif de l'interruption pour un job `paused` par un redémarrage du serveur |
 | `preset_id` | str? | Preset de conversion ffmpeg choisi (`copy` par défaut) |
 | `format_id` | str? | Format yt-dlp choisi |
+| `playlist_items` | int? | Rang (1–50) de la vidéo visée dans une page à plusieurs vidéos ; `null` = vidéo unique. Ajouté par migration additive |
 | `created_at` / `updated_at` | datetime | Horodatage |
 
 ### `SiteRule`

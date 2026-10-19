@@ -24,21 +24,22 @@ la page :
 - L'élément sélectionné (tag, attributs pertinents comme `src`/`currentSrc`, position dans le DOM)
   est renvoyé au `background.ts` via message runtime.
 
-## 2. Corrélation réseau (`background.ts` + `lib/correlation.ts`)
+## 2. Corrélation réseau (`background.ts` + `extension/src/lib/detection.ts`)
 
-Le background script conserve un buffer glissant des requêtes réseau récentes de l'onglet (issues
-du même sniffer que la détection automatique, voir
-[modules/detection.md](detection.md#2-sniffing-réseau-extension)), stocké dans
-`chrome.storage.session` pour survivre à un éventuel réveil du service worker.
+La corrélation rattache l'élément choisi via le picker DOM à une URL média exploitable. Elle reçoit
+les candidats récents de l'onglet, issus du même sniffer que la détection automatique (voir
+[modules/detection.md](detection.md#2-sniffing-réseau-extension)).
 
-`extension/lib/correlation.ts` croise l'élément DOM sélectionné avec ce buffer :
+`correlatePickedElement` (`extension/src/lib/detection.ts`) applique, dans cet ordre :
 
-- correspondance directe si l'élément expose un `src`/`currentSrc` qui matche une requête récente ;
-- à défaut, heuristique temporelle : requêtes vidéo/flux (mêmes patterns que le sniffer automatique)
-  survenues dans une fenêtre de temps proche du chargement/de l'interaction avec l'élément
-  sélectionné ;
-- si plusieurs candidats subsistent, la ou les URLs les plus probables sont proposées à
-  l'utilisateur pour confirmation plutôt que choisies silencieusement.
+- si l'élément porte lui-même une URL média reconnue (`currentSrc`, à défaut `src`), elle est retenue
+  (source `picked`) ;
+- sinon, le candidat le plus récemment détecté par le sniffer est retenu : meilleure approximation
+  disponible, l'utilisateur venant de cliquer sur le lecteur ;
+- sans élément ni candidat, il n'y a pas de proposition.
+
+Il n'y a pas de fenêtre temporelle ni de liste multiple tranchée en silence : le résultat unique est
+présenté à l'utilisateur, qui confirme ou non (voir section 3).
 
 ## 3. Proposition et confirmation
 

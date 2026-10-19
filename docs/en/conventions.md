@@ -31,7 +31,7 @@
 - **Mandatory split beyond 500 lines**: extract into modules/subcomponents before
   continuing to add code to a file that exceeds this threshold.
 - Colocation: a React component lives with its styles and tests in the same folder; a
-  server service (`services/ytdlp.py`) lives with its test (`tests/test_ytdlp.py` or equivalent).
+  server service (`core/ytdlp.py`) lives with its test (`tests/test_ytdlp.py` or equivalent).
 
 ## Tests
 

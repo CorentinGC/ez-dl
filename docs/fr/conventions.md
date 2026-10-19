@@ -31,7 +31,7 @@
 - **Découpage obligatoire au-delà de 500 lignes** : extraire en modules/sous-composants avant de
   continuer à ajouter du code dans un fichier qui dépasse ce seuil.
 - Colocation : un composant React va avec ses styles et ses tests dans le même dossier ; un service
-  serveur (`services/ytdlp.py`) va avec son test (`tests/test_ytdlp.py` ou équivalent).
+  serveur (`core/ytdlp.py`) va avec son test (`tests/test_ytdlp.py` ou équivalent).
 
 ## Tests
 

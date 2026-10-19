@@ -52,11 +52,14 @@ root for the template with generic values).
 | `EZDL_YTDLP_UPDATE_INTERVAL_HOURS` | `24` | yt-dlp auto-update period (`0` = disabled) |
 | `EZDL_YTDLP_BINARY` | `yt-dlp` | Path to the yt-dlp binary |
 | `EZDL_FFMPEG_BINARY` | `ffmpeg` | Path to the ffmpeg binary |
+| `EZDL_PROXY` | *(empty)* | Outbound proxy of **yt-dlp** (probe, download, auto-update): `http://`, `https://`, `socks5://` or `socks5h://`. Empty = direct connection. Prefer `socks5h://`: with `socks5://` DNS is resolved locally (resolver leak). The URL may contain credentials (`http://user:pass@host:port`): it is never logged in full and the API only exposes `proxy_enabled`. A malformed value (whitespace, control character, invalid port) prevents startup. Generic example: `http://gluetun:8888` — see [Going through a VPN or proxy](#going-through-a-vpn-or-proxy). |
+| `EZDL_PROBE_TIMEOUT_SECONDS` | `25` | Maximum duration of a URL analysis (probe) before its yt-dlp process group is killed. Must be strictly positive |
 | `EZDL_CORS_ORIGINS` | `chrome-extension://*` | Allowed origins |
 | `EZDL_LOG_LEVEL` | `info` | Log level |
 | `EZDL_AUTO_UPDATE` | `false` | Read by `deploy/auto-update.sh` **on the host** (local-build path) — see [Automatic server updates](#automatic-server-updates) |
 | `EZDL_AUTO_UPDATE_INTERVAL_SECONDS` | `300` | Registry poll period for the `watchtower` service (`autoupdate` profile) |
 | `EZDL_IMAGE` | `ghcr.io/corentingc/ez-dl:latest` | Image run by the compose file — override to pin a sha or use a fork |
+| `EZDL_MEM_LIMIT` | `4g` | Container memory cap, read by **Docker Compose** (`mem_limit`), not by the server. Bounds a runaway extraction instead of letting the host OOM-killer pick a victim |
 
 Generic example of `EZDL_DOWNLOAD_ROOTS` for a NAS: `Movies=/mnt/media/movies,Series=/mnt/media/tv`.
 
@@ -159,6 +162,8 @@ for context):
   by the container user) raises a `WARNING` at startup, and any job targeting it is rejected with
   a `400` before the download starts.
 - Mount a persistent volume on `EZDL_DATA_DIR` (SQLite + state).
+- Process guard rails, keep them: `init: true` (tini as PID 1, reaps orphaned yt-dlp and ffmpeg
+  processes), `pids_limit: 512` and `mem_limit: ${EZDL_MEM_LIMIT:-4g}`.
 - `EZDL_TEMP_DIR` is mounted on the **named volume `ezdl-temp`**, not on a tmpfs: a download cut
   short by a restart then picks up from its partial file instead of being redone from scratch. On
   every startup the server purges the work directories of jobs that are no longer resumable. To
@@ -379,6 +384,61 @@ server {
 
 Behind a proxy, set `EZDL_PUBLIC_URL`: `/extension/update.xml` must publish an absolute download
 URL, and the address uvicorn sees is not the client's.
+
+## Going through a VPN or proxy
+
+`EZDL_PROXY` sends **yt-dlp** traffic (probe, download, auto-update) through a proxy, for example a
+VPN container, for geo-restricted content. The proxy only concerns yt-dlp: the server's own requests
+and the extension's requests do not go through it.
+
+Generic example with [gluetun](https://github.com/qdm12/gluetun) (image `qmcgaw/gluetun:v3.41.3`),
+in a `docker-compose.override.yml` file next to `docker-compose.yml`:
+
+```yaml
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.3
+    container_name: ez-dl-vpn
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN                       # tunnel creation
+    devices:
+      - /dev/net/tun:/dev/net/tun       # TUN device required by the tunnel
+    env_file:
+      - vpn.env                         # OPENVPN_USER, OPENVPN_PASSWORD — file not versioned
+    environment:
+      VPN_SERVICE_PROVIDER: <your-provider>
+      SERVER_REGIONS: <your-region>
+      HTTPPROXY: "on"
+      HTTPPROXY_STEALTH: "on"
+    # No `ports:`: the proxy is only reachable from the Compose network.
+
+  server:
+    depends_on:
+      - gluetun
+```
+
+In the `.env` next to `docker-compose.yml`:
+
+```bash
+EZDL_PROXY=http://gluetun:8888
+```
+
+The server reaches gluetun by its service name on the Compose network. To check at startup,
+`docker compose logs server` must print `Proxy sortant yt-dlp actif : http://gluetun` (scheme and
+host only, never the credentials).
+
+> **Warning — anti-bot check.** A VPN IP address usually belongs to a hosting provider
+> (datacenter). YouTube more often subjects these addresses to its anti-bot check: analyses or
+> downloads may fail even with the proxy active. The proxy is not a guarantee of access to all
+> content.
+
+Never version the `vpn.env` file. Do not publish the proxy port (8888) on the host: any client that
+can reach it can send its traffic out through the VPN.
+
+`EZDL_PROXY` validation is strict. Whitespace and control characters are refused, the port must be
+valid when present, and an invalid value prevents startup without being copied into the error
+message. URL credentials (`user:password@`) are masked (`***`) in the errors reported by yt-dlp.
 
 ## Automatic server updates
 

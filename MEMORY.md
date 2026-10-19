@@ -25,6 +25,14 @@ tant qu'aucun tag semver n'est publié.** `PUID`/`PGID` sont désormais des rég
 `docker-compose.yml` et leurs `.sha256`. `v0.1.0` est un tag orphelin : sa publication a échoué
 sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui correspond.
 
+- **Lot review 2026-10-19** (HEAD `aee0ca0`, commits `37cb68d`, `d321629`, `39b4ba0`, `3cba43f`,
+  `aee0ca0`) : probe borné (règle playlist unique, 422 sur page de liste, `playlist_items`), kill du
+  groupe de process, `EZDL_PROXY` global à yt-dlp, `EZDL_PROBE_TIMEOUT_SECONDS`, file de jobs fiable
+  (annulation, arrêt, reprise, déplacement non bloquant), probe à la demande côté extension, x.com
+  (contexte tweet + rang), overlay ancré au document. Issues fermées : `ez-dl-nta`, `ez-dl-igv`,
+  `ez-dl-s0w`, `ez-dl-1oa`, `ez-dl-srp`, `ez-dl-gap`, `ez-dl-blo`. ADR 0008 (0007 réservée à une
+  autre session : publication Chrome Web Store). Durcissement `004153d` (`ez-dl-68t`). Docs FR/EN synchronisées.
+  **En cours** : déploiement de la prod personnelle (`ez-dl-ei6`).
 - **Serveur** : routes `/api/{health,capabilities,probe,folders,jobs,jobs/events,rules}`, wrappers
   yt-dlp/ffmpeg, queue asyncio + SQLite, auth Bearer. `ruff` clean, **26 tests pytest** verts.
   Smoke test réel validé : health public, 401 sans/avec mauvais mot de passe, 200 avec le bon,
@@ -193,6 +201,33 @@ sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui
       un bandeau d'avertissement et bascule le bouton en « Retélécharger », le badge de l'overlay
       passe en orange 8 s et un second clic renvoie `force: true`. Un serveur antérieur à la route
       (404) n'empêche rien, l'échec est avalé. 188 tests pytest, 215 Vitest. 2026-08-22.
+
+- [x] 2026-10-19 : lot review (`ez-dl-nta`, `ez-dl-igv`, `ez-dl-s0w`, `ez-dl-1oa`, `ez-dl-srp`,
+      `ez-dl-gap`, `ez-dl-blo`) — fermées. Doc mise à jour (ADR 0008, setup VPN, détection, architecture).
+- [ ] `ez-dl-ei6` : déploiement de la prod personnelle en cours.
+- [ ] `ez-dl-v57` : supprimer la valeur `PROBING` de `JobStatus` (encore référencée dans
+      `server/app/api/jobs.py` et `server/app/core/queue_recovery.py`). Pas d'id inventé ici.
+- [ ] Vérifier en réel la sortie par `EZDL_PROXY` (gluetun) et le message de démarrage
+      `Proxy sortant yt-dlp actif`.
+
+## Décisions récentes (2026-10-19)
+
+- **Probe borné** (ADR 0008) : une seule règle playlist (`--no-playlist --playlist-items N`,
+  `--flat-playlist` sans rang) ; page de liste sans rang → 422. Coordination : 2 probes max,
+  coalescing, cache 60 s (constantes de code, pas `EZDL_*`).
+- **Proxy global** (ADR 0008) : `EZDL_PROXY` → `--proxy` pour probe, téléchargement et auto-update.
+  Pas de proxy par job (écarté). Durcissement `004153d` (`ez-dl-68t`) : validation stricte de
+  `EZDL_PROXY` (pas d'espace ni caractère de contrôle, port valide) ; identifiants `user:pass@`
+  masqués dans les erreurs yt-dlp (`redact_credentials`, `server/app/core/process.py`).
+- **Fichiers temporaires inter-volumes** : copie via `tempfile.mkstemp` (nom unique, pas de nom
+  prévisible) dans `server/app/core/workdir.py` (ligne ~115) et `server/app/core/cookies.py` (ligne ~62).
+- **Overlay (durcissement `004153d`)** : clics synthétiques ignorés (`isTrusted` faux,
+  `src/content/videoOverlay.ts`) ; `mediaUrl` vers hôte privé ou de boucle refusée via
+  `isPrivateHostUrl` (`src/lib/privateHost.ts`, utilisée par `src/lib/quickSource.ts`).
+- **Numérotation ADR** : 0007 est réservée à une autre session (publication Chrome Web Store) ;
+  le proxy/probe est l'ADR 0008.
+- **Probe à la demande** : aucun probe en arrière-plan. Overlay = bouton sans requête, probe au clic ;
+  popup = probe à l'ouverture.
 
 ## Décisions récentes (2026-08-21)
 
@@ -411,3 +446,18 @@ sur les deux bugs de CI listés en « Pièges », aucune image ni Release ne lui
   destination — est le seul qui survive à une purge de l'historique ou à une URL différente.
   Corollaire : la route ne bloque rien, sinon un fichier homonyme d'un autre film interdirait un
   téléchargement légitime (`ez-dl-av7`).
+
+- **Tuer un yt-dlp standalone = tuer le GROUPE (ez-dl-nta)** : le binaire PyInstaller a un bootloader
+  et un enfant. Un `kill` sur le seul parent laisse l'enfant extraire et bloquer sur le pipe. Lancer
+  avec `start_new_session=True`, arrêter par `os.killpg` (garde-fou `pgid == pid`).
+- **`-J` sans `--flat-playlist` sur une page de liste extrait TOUTES les entrées en RAM** : c'est la
+  cause de l'OOM en prod. Sans rang demandé, le probe doit rester à plat (ez-dl-nta, 422 sur liste).
+- **Sur X, `<video>.src` est `blob:`** : impossible de relier l'élément à son flux par l'URL. Corréler
+  par l'identifiant de média présent dans le poster (`pbs.twimg.com/…/<id>/…`) et dans le flux
+  (`video.twimg.com/…/<id>/…`) (ez-dl-gap).
+- **Overlay `position:fixed` + recalcul sur scroll = latence d'une frame** : le bouton traîne derrière
+  la vidéo. Ancrer l'hôte en `position:absolute` à l'origine du document (coordonnées document) ; `fixed`
+  seulement en plein écran. Distinct du piège `ez-dl-8hm` (c'est la popup, pas le content script)
+  (ez-dl-blo).
+- **Bd : `bd dep add A B` signifie « A dépend de B »** (B doit être fait avant A). Vérifier le sens avant
+  de lier deux issues.
